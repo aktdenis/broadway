@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, GitBranch, RefreshCw, ServerOff } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ExternalLink, GitBranch, RefreshCw, ServerOff, Trash2 } from "lucide-react";
 
 interface Preview {
   repo: string;
@@ -54,10 +55,77 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function DeployForm({ onDeployed }: { onDeployed: () => void }) {
+  const [prUrl, setPrUrl] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [deploying, setDeploying] = useState<{ repo: string; prNumber: number } | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setPending(true);
+
+    try {
+      const res = await fetch("/api/previews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prUrl }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Deployment failed");
+      } else {
+        setPrUrl("");
+        setDeploying({ repo: data.repo, prNumber: data.prNumber });
+        // Poll until it appears in the list
+        const poll = setInterval(async () => {
+          const r = await fetch("/api/previews");
+          const list: Preview[] = await r.json();
+          if (list.some((p) => p.prNumber === data.prNumber)) {
+            clearInterval(poll);
+            setDeploying(null);
+            onDeployed();
+          }
+        }, 8_000);
+      }
+    } catch {
+      setError("Network error");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <form onSubmit={handleSubmit} className="flex gap-2">
+        <Input
+          placeholder="https://github.com/owner/repo/pull/123"
+          value={prUrl}
+          onChange={(e) => setPrUrl(e.target.value)}
+          disabled={pending}
+          className="font-mono text-sm"
+        />
+        <Button type="submit" disabled={pending || !prUrl.trim()}>
+          {pending ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Deploy"}
+        </Button>
+      </form>
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      {deploying && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <RefreshCw className="w-3 h-3 animate-spin" />
+          Deploying {deploying.repo} PR #{deploying.prNumber} — this takes 2–3 min…
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function PreviewTable() {
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, startRefresh] = useTransition();
+  const [tearingDown, setTearingDown] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -77,6 +145,16 @@ export function PreviewTable() {
     return () => clearInterval(id);
   }, []);
 
+  async function teardown(dseq: string) {
+    setTearingDown(dseq);
+    try {
+      await fetch(`/api/previews/${dseq}`, { method: "DELETE" });
+      await load();
+    } finally {
+      setTearingDown(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24 text-muted-foreground text-sm">
@@ -87,16 +165,16 @@ export function PreviewTable() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <DeployForm onDeployed={() => startRefresh(load)} />
+
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-6 text-sm">
-          <span>
-            <span className="font-semibold tabular-nums">{previews.length}</span>
-            <span className="text-muted-foreground ml-1">
-              {previews.length === 1 ? "preview" : "previews"} active
-            </span>
+        <span className="text-sm">
+          <span className="font-semibold tabular-nums">{previews.length}</span>
+          <span className="text-muted-foreground ml-1">
+            {previews.length === 1 ? "preview" : "previews"} active
           </span>
-        </div>
+        </span>
         <Button
           variant="ghost"
           size="sm"
@@ -116,10 +194,11 @@ export function PreviewTable() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[80px]">PR</TableHead>
-                <TableHead>Repo / Branch</TableHead>
+                <TableHead>Repo</TableHead>
                 <TableHead className="w-[100px]">Status</TableHead>
                 <TableHead>Preview URL</TableHead>
                 <TableHead className="w-[90px] text-right">Age</TableHead>
+                <TableHead className="w-[50px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -152,6 +231,22 @@ export function PreviewTable() {
                   <TableCell className="text-right text-sm text-muted-foreground tabular-nums">
                     {timeAgo(p.createdAt)}
                   </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="w-8 h-8 text-muted-foreground hover:text-red-500"
+                      disabled={tearingDown === p.dseq}
+                      onClick={() => teardown(p.dseq)}
+                      aria-label="Teardown"
+                    >
+                      {tearingDown === p.dseq ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -169,9 +264,7 @@ function EmptyState() {
         <ServerOff className="w-10 h-10 text-muted-foreground mb-4" strokeWidth={1.25} />
         <p className="text-sm font-medium mb-1">No active previews</p>
         <p className="text-xs text-muted-foreground max-w-xs">
-          Open or sync a pull request on{" "}
-          <span className="font-mono">akash-network/website</span> to
-          automatically deploy a preview on Akash Network.
+          Paste a GitHub PR URL above to deploy a preview on Akash Network.
         </p>
       </div>
     </div>

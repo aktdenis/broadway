@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { allRecords } from "@/lib/deploy/store";
 import { AkashConsoleClient } from "@/lib/akash/client";
+import { deployPreview } from "@/lib/deploy/orchestrator";
 
 export async function GET() {
   const records = allRecords();
@@ -30,4 +31,28 @@ export async function GET() {
   );
 
   return NextResponse.json(enriched);
+}
+
+export async function POST(req: Request) {
+  const { prUrl } = await req.json();
+
+  const match = (prUrl ?? "").match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+  if (!match) {
+    return NextResponse.json({ error: "Invalid GitHub PR URL" }, { status: 400 });
+  }
+
+  const repo = match[1];
+  const prNumber = parseInt(match[2], 10);
+
+  const apiKey = process.env.AKASH_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: "AKASH_API_KEY not set" }, { status: 500 });
+  }
+
+  const akashClient = new AkashConsoleClient(apiKey);
+
+  // Fire-and-forget — deployment takes 2-3 min, client polls /api/previews
+  deployPreview({ repo, prNumber, akashClient }).catch(console.error);
+
+  return NextResponse.json({ accepted: true, repo, prNumber });
 }
