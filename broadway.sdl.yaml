@@ -9,15 +9,13 @@ services:
         as: 80
         to:
           - global: true
-        hosts:
-          - broadway.akash.world
     env:
       - AKASH_API_KEY=
       - GITHUB_TOKEN=
       - WEBHOOK_SECRET=
       - STORE_PATH=/data/deployments.json
       - NODE_ENV=production
-      - BROADWAY_DOMAIN=broadway.akash.world
+      - BROADWAY_DOMAIN=akash.world
 
 profiles:
   compute:
