@@ -32,7 +32,9 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
   console.log(`[deploy] Lease created`);
 
   console.log(`[deploy] Waiting for service URI…`);
-  const previewUrl = await akashClient.waitForServiceUri(dseq);
+  const providerUrl = await akashClient.waitForServiceUri(dseq);
+  const domain = process.env.BROADWAY_DOMAIN ?? "broadway.akash.world";
+  const previewUrl = `https://pr-${prNumber}.${domain}`;
   console.log(`[deploy] Preview live at: ${previewUrl}`);
 
   upsertRecord({
@@ -42,6 +44,7 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
     gseq: bid.id.gseq,
     oseq: bid.id.oseq,
     provider: bid.id.provider,
+    providerUrl,
     previewUrl,
     createdAt: new Date().toISOString(),
   });
