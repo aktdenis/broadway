@@ -24,7 +24,10 @@ jobs:
   build-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        run: |
+          git clone https://github.com/${{ github.repository }}.git .
+          git checkout ${{ github.sha }}
 
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
