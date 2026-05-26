@@ -5,6 +5,7 @@ import { deployPreview, teardownPreview } from "@/lib/deploy/orchestrator";
 export interface WebhookPayload {
   action: string;
   number: number;
+  label?: { name: string };
   pull_request: {
     head: { sha: string; ref: string };
     base: { repo: { full_name: string } };
@@ -24,8 +25,12 @@ export class GitHubHandler {
     const { action, number: prNumber, repository } = payload;
     const repo = repository.full_name;
 
-    if (action === "opened" || action === "synchronize" || action === "reopened") {
+    const isPreviewLabel = payload.label?.name === "preview";
+
+    if (action === "labeled" && isPreviewLabel) {
       await this.deploy(repo, prNumber);
+    } else if (action === "unlabeled" && isPreviewLabel) {
+      await this.teardown(repo, prNumber);
     } else if (action === "closed") {
       await this.teardown(repo, prNumber);
     }
