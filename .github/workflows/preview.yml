@@ -1,0 +1,119 @@
+# Builds the Astro site for a PR branch and pushes a Docker image to ghcr.io.
+# The Broadway service picks up the image via webhook and deploys it on Akash.
+#
+# Add this workflow to akash-network/website, not this repo.
+# Required secrets: AKASH_PREVIEW_WEBHOOK_URL, AKASH_PREVIEW_WEBHOOK_SECRET
+#
+# TRIGGERING A PREVIEW
+#   Add the "preview" label to any PR — a maintainer must do this.
+#   Bots and external contributors cannot trigger deployments on their own.
+#   Remove the label or close the PR to tear down the deployment.
+
+name: PR Preview
+
+on:
+  pull_request:
+    types: [labeled, unlabeled, closed, synchronize]
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    # Only build when the "preview" label is present and the PR is not closed
+    if: |
+      github.event.action != 'closed' &&
+      (
+        github.event.label.name == 'preview' ||
+        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'preview'))
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          PUBLIC_PR_NUMBER: ${{ github.event.number }}
+
+      - name: Write Dockerfile
+        run: |
+          cat > Dockerfile.preview <<'EOF'
+          FROM nginx:alpine
+          COPY dist/ /usr/share/nginx/html/
+          EOF
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.preview
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:pr-${{ github.event.number }}
+
+  notify:
+    needs: [build-and-push]
+    # Also runs on 'closed' (no build needed, just teardown) and on 'unlabeled preview' (teardown)
+    if: |
+      always() && (
+        github.event.action == 'closed' ||
+        (github.event.action == 'unlabeled' && github.event.label.name == 'preview') ||
+        needs.build-and-push.result == 'success'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Broadway webhook
+        run: |
+          # Map GitHub event to Broadway action
+          if [[ "${{ github.event.action }}" == "closed" ]]; then
+            ACTION="closed"
+          elif [[ "${{ github.event.action }}" == "unlabeled" ]]; then
+            ACTION="closed"
+          else
+            ACTION="synchronize"
+          fi
+
+          PAYLOAD=$(jq -nc \
+            --arg action "$ACTION" \
+            --argjson number ${{ github.event.number }} \
+            --arg repo "${{ github.repository }}" \
+            --arg sha  "${{ github.event.pull_request.head.sha }}" \
+            --arg ref  "${{ github.event.pull_request.head.ref }}" \
+            --arg url  "${{ github.event.pull_request.html_url }}" \
+            '{
+              action: $action,
+              number: $number,
+              pull_request: { head: { sha: $sha, ref: $ref }, html_url: $url,
+                              base: { repo: { full_name: $repo } } },
+              repository: { full_name: $repo }
+            }')
+
+          SIG=$(echo -n "$PAYLOAD" | \
+            openssl dgst -sha256 -hmac "${{ secrets.AKASH_PREVIEW_WEBHOOK_SECRET }}" | \
+            awk '{print "sha256="$2}')
+
+          curl -fsSL \
+            -X POST "${{ secrets.AKASH_PREVIEW_WEBHOOK_URL }}/api/webhook/github" \
+            -H "Content-Type: application/json" \
+            -H "x-github-event: pull_request" \
+            -H "x-hub-signature-256: $SIG" \
+            -d "$PAYLOAD"

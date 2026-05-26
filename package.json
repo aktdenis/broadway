@@ -1,0 +1,27 @@
+{
+  "name": "akash-broadway",
+  "version": "0.1.0",
+  "description": "Branch preview deployment service for akash-network/website using Akash Console API",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "deploy:akash": "ts-node scripts/deploy-self.ts"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.1.1",
+    "@octokit/webhooks": "^13.3.0",
+    "axios": "^1.7.7",
+    "express": "^4.21.1",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.9.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

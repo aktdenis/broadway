@@ -1,0 +1,43 @@
+---
+version: "2.0"
+
+services:
+  broadway:
+    image: ghcr.io/akash-network/broadway:latest
+    expose:
+      - port: 3000
+        as: 80
+        to:
+          - global: true
+        hosts:
+          - broadway.akash.world
+    env:
+      - AKASH_API_KEY=
+      - GITHUB_TOKEN=
+      - WEBHOOK_SECRET=
+      - STORE_PATH=/data/deployments.json
+      - NODE_ENV=production
+      - BROADWAY_DOMAIN=broadway.akash.world
+
+profiles:
+  compute:
+    broadway:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 512Mi
+        storage:
+          - size: 2Gi
+  placement:
+    dcloud:
+      pricing:
+        broadway:
+          denom: uusd
+          amount: 1000
+
+deployment:
+  broadway:
+    dcloud:
+      profile: broadway
+      count: 1
