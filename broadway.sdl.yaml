@@ -3,7 +3,7 @@ version: "2.0"
 
 services:
   broadway:
-    image: ghcr.io/akash-network/broadway:latest
+    image: ghcr.io/aktdenis/broadway:latest
     expose:
       - port: 3000
         as: 80

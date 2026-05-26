@@ -26,7 +26,7 @@ async function main() {
 
   const rawSdl = fs.readFileSync(SDL_PATH, "utf8");
   const sdl = rawSdl
-    .replace("image: ghcr.io/akash-network/broadway:latest", `image: ${broadwayImage}`)
+    .replace("image: ghcr.io/aktdenis/broadway:latest", `image: ${broadwayImage}`)
     .replace("- AKASH_API_KEY=", `- AKASH_API_KEY=${apiKey}`)
     .replace("- GITHUB_TOKEN=", `- GITHUB_TOKEN=${githubToken}`)
     .replace("- WEBHOOK_SECRET=", `- WEBHOOK_SECRET=${webhookSecret}`);
