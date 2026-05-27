@@ -39,6 +39,8 @@ interface Preview {
   monthlyUsd?: number;
 }
 
+const TOKEN_KEY = "broadway_deploy_token";
+
 function PhaseBadge({ p }: { p: Preview }) {
   if (p.phase === "building") {
     return (
@@ -79,7 +81,15 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-function DeployForm({ onDeployed }: { onDeployed: () => void }) {
+function DeployForm({
+  token,
+  onToken,
+  onDeployed,
+}: {
+  token: string;
+  onToken: (t: string) => void;
+  onDeployed: () => void;
+}) {
   const [prUrl, setPrUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -91,7 +101,7 @@ function DeployForm({ onDeployed }: { onDeployed: () => void }) {
     try {
       const res = await fetch("/api/previews", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-deploy-token": token },
         body: JSON.stringify({ prUrl }),
       });
       const data = await res.json();
@@ -112,13 +122,21 @@ function DeployForm({ onDeployed }: { onDeployed: () => void }) {
     <div className="space-y-2">
       <form onSubmit={handleSubmit} className="flex gap-2">
         <Input
-          placeholder="https://github.com/owner/repo/pull/123"
+          type="password"
+          placeholder="Deploy password"
+          value={token}
+          onChange={(e) => onToken(e.target.value)}
+          className="w-44 text-sm"
+          aria-label="Deploy password"
+        />
+        <Input
+          placeholder="https://github.com/akash-network/website/pull/123"
           value={prUrl}
           onChange={(e) => setPrUrl(e.target.value)}
           disabled={pending}
-          className="font-mono text-sm"
+          className="font-mono text-sm flex-1"
         />
-        <Button type="submit" disabled={pending || !prUrl.trim()}>
+        <Button type="submit" disabled={pending || !prUrl.trim() || !token.trim()}>
           {pending ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Deploy"}
         </Button>
       </form>
@@ -138,6 +156,16 @@ export function PreviewTable() {
   const [loading, setLoading] = useState(true);
   const [refreshing, startRefresh] = useTransition();
   const [tearingDown, setTearingDown] = useState<string | null>(null);
+  const [token, setToken] = useState("");
+
+  useEffect(() => {
+    setToken(localStorage.getItem(TOKEN_KEY) ?? "");
+  }, []);
+
+  function saveToken(t: string) {
+    setToken(t);
+    localStorage.setItem(TOKEN_KEY, t);
+  }
 
   async function load() {
     try {
@@ -160,7 +188,10 @@ export function PreviewTable() {
   async function teardown(id: string) {
     setTearingDown(id);
     try {
-      await fetch(`/api/previews/${id}`, { method: "DELETE" });
+      await fetch(`/api/previews/${id}`, {
+        method: "DELETE",
+        headers: { "x-deploy-token": token },
+      });
       await load();
     } finally {
       setTearingDown(null);
@@ -178,7 +209,7 @@ export function PreviewTable() {
 
   return (
     <div className="space-y-6">
-      <DeployForm onDeployed={() => startRefresh(load)} />
+      <DeployForm token={token} onToken={saveToken} onDeployed={() => startRefresh(load)} />
 
       <div className="flex items-center justify-between">
         <span className="text-sm">
@@ -307,7 +338,8 @@ function EmptyState() {
         <ServerOff className="w-10 h-10 text-muted-foreground mb-4" strokeWidth={1.25} />
         <p className="text-sm font-medium mb-1">No active previews</p>
         <p className="text-xs text-muted-foreground max-w-xs">
-          Paste a GitHub PR URL above to build and deploy a preview on Akash Network.
+          Enter your deploy password and paste an akash-network/website PR URL to deploy a
+          preview on Akash Network.
         </p>
       </div>
     </div>

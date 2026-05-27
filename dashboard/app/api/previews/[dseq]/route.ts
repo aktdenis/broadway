@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { AkashConsoleClient } from "@/lib/akash/client";
 import { deleteRecord, allRecords } from "@/lib/deploy/store";
+import { authorized } from "@/lib/auth";
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ dseq: string }> }
 ) {
+  if (!authorized(req)) {
+    return NextResponse.json({ error: "Wrong or missing deploy password" }, { status: 401 });
+  }
+
   const { dseq } = await params;
   const apiKey = process.env.AKASH_API_KEY;
   if (!apiKey) {

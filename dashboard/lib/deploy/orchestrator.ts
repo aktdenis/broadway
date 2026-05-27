@@ -21,6 +21,10 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
   const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
   const previewUrl = `https://pr-${prNumber}.${domain}`;
 
+  // Capture any existing deployment for this PR so we can close it after
+  // recording the new build — re-deploys must not orphan the old Akash lease.
+  const prev = getRecord(repo, prNumber);
+
   // Record immediately so the dashboard shows progress — and so any early
   // failure (e.g. missing token) surfaces as a visible "failed" row.
   upsertRecord({
@@ -30,6 +34,15 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
     previewUrl,
     createdAt: new Date().toISOString(),
   });
+
+  if (prev?.dseq) {
+    try {
+      await akashClient.closeDeployment(prev.dseq);
+      console.log(`[deploy] Closed previous dseq=${prev.dseq} before re-deploy`);
+    } catch (e) {
+      console.error(`[deploy] Could not close previous dseq ${prev.dseq}:`, e);
+    }
+  }
 
   try {
     const token = process.env.GITHUB_TOKEN;

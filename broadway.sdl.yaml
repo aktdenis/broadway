@@ -13,9 +13,15 @@ services:
       - AKASH_API_KEY=
       - GITHUB_TOKEN=
       - WEBHOOK_SECRET=
+      - DEPLOY_TOKEN=
       - STORE_PATH=/data/deployments.json
       - NODE_ENV=production
       - BROADWAY_DOMAIN=akash.world
+      - MAX_PREVIEWS=8
+    params:
+      storage:
+        data:
+          mount: /data
 
 profiles:
   compute:
@@ -26,7 +32,12 @@ profiles:
         memory:
           size: 512Mi
         storage:
-          - size: 2Gi
+          - size: 1Gi
+          - name: data
+            size: 1Gi
+            attributes:
+              persistent: true
+              class: beta3
   placement:
     dcloud:
       pricing:

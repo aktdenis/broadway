@@ -29,7 +29,8 @@ async function main() {
     .replace("image: ghcr.io/aktdenis/broadway:latest", `image: ${broadwayImage}`)
     .replace("- AKASH_API_KEY=", `- AKASH_API_KEY=${apiKey}`)
     .replace("- GITHUB_TOKEN=", `- GITHUB_TOKEN=${githubToken}`)
-    .replace("- WEBHOOK_SECRET=", `- WEBHOOK_SECRET=${webhookSecret}`);
+    .replace("- WEBHOOK_SECRET=", `- WEBHOOK_SECRET=${webhookSecret}`)
+    .replace("- DEPLOY_TOKEN=", `- DEPLOY_TOKEN=${process.env.DEPLOY_TOKEN ?? ""}`);
 
   const client = new AkashConsoleClient(apiKey!);
 
