@@ -125,12 +125,19 @@ export class AkashConsoleClient {
     return res.data.data;
   }
 
-  /** Wait up to maxWaitMs for at least one open bid, then return the cheapest. */
-  async waitForBid(dseq: string, maxWaitMs = 60_000, pollMs = 5_000): Promise<BidItem["bid"]> {
+  /** Wait up to maxWaitMs for at least one open bid, then return the cheapest non-excluded. */
+  async waitForBid(
+    dseq: string,
+    maxWaitMs = 60_000,
+    pollMs = 5_000,
+    excludeProviders: string[] = []
+  ): Promise<BidItem["bid"]> {
     const deadline = Date.now() + maxWaitMs;
     while (Date.now() < deadline) {
       const bids = await this.getBids(dseq);
-      const open = bids.filter((b) => b.bid.state === "open");
+      const open = bids
+        .filter((b) => b.bid.state === "open")
+        .filter((b) => !excludeProviders.includes(b.bid.id.provider));
       if (open.length > 0) {
         return open.reduce((best, b) =>
           parseFloat(b.bid.price.amount) < parseFloat(best.bid.price.amount) ? b : best
