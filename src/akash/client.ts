@@ -113,6 +113,11 @@ export class AkashConsoleClient {
     await this.http.delete(`/v1/deployments/${dseq}`);
   }
 
+  /** Update a deployment in place — keeps the same lease, provider, and URL. */
+  async updateDeployment(dseq: string, sdl: string): Promise<void> {
+    await this.http.put(`/v1/deployments/${dseq}`, { data: { sdl } });
+  }
+
   async getBids(dseq: string): Promise<BidItem[]> {
     const res = await this.http.get<{ data: BidItem[] }>(`/v1/bids/${dseq}`);
     return res.data.data ?? [];
