@@ -33,6 +33,7 @@ function load(): Record<string, PreviewRecord> {
 }
 
 function save(data: Record<string, PreviewRecord>): void {
+  fs.mkdirSync(path.dirname(STORE_PATH), { recursive: true });
   fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
 }
 

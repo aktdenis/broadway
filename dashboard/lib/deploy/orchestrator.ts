@@ -18,13 +18,11 @@ export interface DeployResult {
 export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployResult> {
   const { repo, prNumber, akashClient, depositUsd = 2.0 } = opts;
 
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error("GITHUB_TOKEN not set");
-
   const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
   const previewUrl = `https://pr-${prNumber}.${domain}`;
 
-  // Record immediately so the dashboard shows the build in progress.
+  // Record immediately so the dashboard shows progress — and so any early
+  // failure (e.g. missing token) surfaces as a visible "failed" row.
   upsertRecord({
     repo,
     prNumber,
@@ -34,6 +32,9 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
   });
 
   try {
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) throw new Error("GITHUB_TOKEN not set");
+
     // 1. Build the PR into an image via the fork's GitHub Actions workflow.
     console.log(`[deploy] Triggering build for ${repo} PR #${prNumber}…`);
     const run = await startBuild(prNumber, token);
