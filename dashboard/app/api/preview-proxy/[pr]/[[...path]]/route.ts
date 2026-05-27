@@ -13,12 +13,30 @@ export async function GET(
     return new NextResponse("Preview not found", { status: 404 });
   }
 
-  const suffix = segments?.join("/") ?? "";
+  // The Cloudflare Worker prepends /api/preview-proxy/{pr}/ to every request path.
+  // If the browser URL somehow becomes pr-N.akash.world/api/preview-proxy/N
+  // (e.g. Astro view-transitions picks up the Worker-forwarded redirect URL),
+  // the Worker double-prefixes the next request:
+  //   pr-N.akash.world/api/preview-proxy/N  →  /api/preview-proxy/N/api/preview-proxy/N
+  // Detect and strip the inner prefix so the preview still serves correctly.
+  let realSegments = segments;
+  if (
+    segments &&
+    segments.length >= 3 &&
+    segments[0] === "api" &&
+    segments[1] === "preview-proxy" &&
+    segments[2] === pr
+  ) {
+    realSegments = segments.slice(3); // e.g. [] for root, ["docs"] for /docs
+  }
+
+  const suffix = realSegments?.join("/") ?? "";
   const target = `${record.providerUrl}/${suffix}${request.nextUrl.search}`;
 
   try {
     const upstream = await fetch(target, {
       headers: { accept: request.headers.get("accept") ?? "*/*" },
+      redirect: "follow",
     });
 
     const body = await upstream.arrayBuffer();
