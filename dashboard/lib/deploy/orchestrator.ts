@@ -1,6 +1,7 @@
 import { AkashConsoleClient } from "@/lib/akash/client";
 import { buildPreviewSdl, prImageRef } from "@/lib/akash/sdl";
-import { upsertRecord, deleteRecord, getRecord } from "@/lib/deploy/store";
+import { startBuild, awaitBuild } from "@/lib/github-build";
+import { upsertRecord, patchRecord, deleteRecord, getRecord } from "@/lib/deploy/store";
 
 export interface DeployPreviewOptions {
   repo: string;        // e.g. "akash-network/website"
@@ -16,40 +17,62 @@ export interface DeployResult {
 
 export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployResult> {
   const { repo, prNumber, akashClient, depositUsd = 2.0 } = opts;
-  const imageRef = prImageRef(repo, prNumber);
-  const sdl = buildPreviewSdl(imageRef);
 
-  console.log(`[deploy] Creating deployment for ${repo} PR #${prNumber} (image: ${imageRef})`);
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) throw new Error("GITHUB_TOKEN not set");
 
-  const { dseq, manifest } = await akashClient.createDeployment(sdl, depositUsd);
-  console.log(`[deploy] Deployment created: dseq=${dseq}`);
-
-  console.log(`[deploy] Waiting for bids on dseq=${dseq}…`);
-  const bid = await akashClient.waitForBid(dseq);
-  console.log(`[deploy] Accepted bid from provider=${bid.id.provider} price=${bid.price.amount}${bid.price.denom}`);
-
-  await akashClient.createLease(manifest, dseq, bid.id.gseq, bid.id.oseq, bid.id.provider);
-  console.log(`[deploy] Lease created`);
-
-  console.log(`[deploy] Waiting for service URI…`);
-  const providerUrl = await akashClient.waitForServiceUri(dseq);
-  const domain = process.env.BROADWAY_DOMAIN ?? "broadway.akash.world";
+  const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
   const previewUrl = `https://pr-${prNumber}.${domain}`;
-  console.log(`[deploy] Preview live at: ${previewUrl}`);
 
+  // Record immediately so the dashboard shows the build in progress.
   upsertRecord({
     repo,
     prNumber,
-    dseq,
-    gseq: bid.id.gseq,
-    oseq: bid.id.oseq,
-    provider: bid.id.provider,
-    providerUrl,
+    phase: "building",
     previewUrl,
     createdAt: new Date().toISOString(),
   });
 
-  return { dseq, previewUrl };
+  try {
+    // 1. Build the PR into an image via the fork's GitHub Actions workflow.
+    console.log(`[deploy] Triggering build for ${repo} PR #${prNumber}…`);
+    const run = await startBuild(prNumber, token);
+    patchRecord(repo, prNumber, { buildRunUrl: run.htmlUrl });
+    await awaitBuild(run.id, token);
+    console.log(`[deploy] Build complete`);
+
+    // 2. Deploy the freshly built image to Akash.
+    patchRecord(repo, prNumber, { phase: "deploying" });
+    const imageRef = prImageRef(prNumber);
+    const sdl = buildPreviewSdl(imageRef);
+
+    const { dseq, manifest } = await akashClient.createDeployment(sdl, depositUsd);
+    patchRecord(repo, prNumber, { dseq });
+    console.log(`[deploy] Deployment created: dseq=${dseq}`);
+
+    const bid = await akashClient.waitForBid(dseq);
+    await akashClient.createLease(manifest, dseq, bid.id.gseq, bid.id.oseq, bid.id.provider);
+    console.log(`[deploy] Lease created with provider=${bid.id.provider}`);
+
+    const providerUrl = await akashClient.waitForServiceUri(dseq);
+    console.log(`[deploy] Preview live at: ${previewUrl}`);
+
+    patchRecord(repo, prNumber, {
+      phase: "live",
+      dseq,
+      gseq: bid.id.gseq,
+      oseq: bid.id.oseq,
+      provider: bid.id.provider,
+      providerUrl,
+    });
+
+    return { dseq, previewUrl };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[deploy] Failed for ${repo} PR #${prNumber}: ${msg}`);
+    patchRecord(repo, prNumber, { phase: "failed", error: msg });
+    throw err;
+  }
 }
 
 export async function teardownPreview(
@@ -63,8 +86,10 @@ export async function teardownPreview(
     return;
   }
 
-  console.log(`[teardown] Closing deployment dseq=${record.dseq}`);
-  await akashClient.closeDeployment(record.dseq);
+  if (record.dseq) {
+    console.log(`[teardown] Closing deployment dseq=${record.dseq}`);
+    await akashClient.closeDeployment(record.dseq);
+  }
   deleteRecord(repo, prNumber);
   console.log(`[teardown] Done`);
 }

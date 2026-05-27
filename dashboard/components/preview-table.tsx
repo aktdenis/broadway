@@ -12,43 +12,67 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ExternalLink, GitBranch, RefreshCw, ServerOff, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  ExternalLink,
+  FileText,
+  GitBranch,
+  Hammer,
+  RefreshCw,
+  ServerOff,
+  Trash2,
+} from "lucide-react";
+
+type Phase = "building" | "deploying" | "live" | "failed";
 
 interface Preview {
   repo: string;
   prNumber: number;
-  dseq: string;
-  gseq: number;
-  oseq: number;
-  provider: string;
+  phase: Phase;
   previewUrl: string;
+  buildRunUrl?: string;
+  error?: string;
+  dseq?: string;
+  provider?: string;
   createdAt: string;
   status?: string;
   monthlyUsd?: number;
 }
 
-function StatusBadge({ status }: { status?: string }) {
-  if (!status || status === "unknown") {
-    return <Badge variant="outline">unknown</Badge>;
-  }
-  if (status === "active") {
+function PhaseBadge({ p }: { p: Preview }) {
+  if (p.phase === "building") {
     return (
-      <Badge className="bg-black text-white hover:bg-black border-0">live</Badge>
+      <Badge variant="outline" className="text-muted-foreground animate-pulse gap-1">
+        <Hammer className="w-3 h-3" />
+        building
+      </Badge>
     );
   }
-  if (status === "deploying" || status === "pending") {
+  if (p.phase === "deploying") {
     return (
       <Badge variant="outline" className="text-muted-foreground animate-pulse">
         deploying
       </Badge>
     );
   }
-  return <Badge variant="outline">{status}</Badge>;
+  if (p.phase === "failed") {
+    return (
+      <Badge variant="outline" className="text-red-500 border-red-200 gap-1">
+        <AlertCircle className="w-3 h-3" />
+        failed
+      </Badge>
+    );
+  }
+  if (p.status && p.status !== "active" && p.status !== "unknown") {
+    return <Badge variant="outline">{p.status}</Badge>;
+  }
+  return <Badge className="bg-black text-white hover:bg-black border-0">live</Badge>;
 }
 
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
@@ -59,13 +83,11 @@ function DeployForm({ onDeployed }: { onDeployed: () => void }) {
   const [prUrl, setPrUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [deploying, setDeploying] = useState<{ repo: string; prNumber: number } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setPending(true);
-
     try {
       const res = await fetch("/api/previews", {
         method: "POST",
@@ -77,17 +99,7 @@ function DeployForm({ onDeployed }: { onDeployed: () => void }) {
         setError(data.error ?? "Deployment failed");
       } else {
         setPrUrl("");
-        setDeploying({ repo: data.repo, prNumber: data.prNumber });
-        // Poll until it appears in the list
-        const poll = setInterval(async () => {
-          const r = await fetch("/api/previews");
-          const list: Preview[] = await r.json();
-          if (list.some((p) => p.prNumber === data.prNumber)) {
-            clearInterval(poll);
-            setDeploying(null);
-            onDeployed();
-          }
-        }, 8_000);
+        onDeployed();
       }
     } catch {
       setError("Network error");
@@ -110,11 +122,11 @@ function DeployForm({ onDeployed }: { onDeployed: () => void }) {
           {pending ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Deploy"}
         </Button>
       </form>
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      {deploying && (
-        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <RefreshCw className="w-3 h-3 animate-spin" />
-          Deploying {deploying.repo} PR #{deploying.prNumber} — this takes 2–3 min…
+      {error ? (
+        <p className="text-xs text-red-500">{error}</p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Builds the PR and deploys it to Akash — usually 8–10 minutes end to end.
         </p>
       )}
     </div>
@@ -141,14 +153,14 @@ export function PreviewTable() {
 
   useEffect(() => {
     load();
-    const id = setInterval(load, 30_000);
+    const id = setInterval(load, 10_000);
     return () => clearInterval(id);
   }, []);
 
-  async function teardown(dseq: string) {
-    setTearingDown(dseq);
+  async function teardown(id: string) {
+    setTearingDown(id);
     try {
-      await fetch(`/api/previews/${dseq}`, { method: "DELETE" });
+      await fetch(`/api/previews/${id}`, { method: "DELETE" });
       await load();
     } finally {
       setTearingDown(null);
@@ -195,65 +207,96 @@ export function PreviewTable() {
               <TableRow>
                 <TableHead className="w-[80px]">PR</TableHead>
                 <TableHead>Repo</TableHead>
-                <TableHead className="w-[100px]">Status</TableHead>
+                <TableHead className="w-[110px]">Status</TableHead>
                 <TableHead>Preview URL</TableHead>
                 <TableHead className="w-[90px] text-right">Age</TableHead>
                 <TableHead className="w-[50px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {previews.map((p) => (
-                <TableRow key={p.dseq}>
-                  <TableCell className="font-mono font-medium">
-                    #{p.prNumber}
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm font-medium">{p.repo}</div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                      <GitBranch className="w-3 h-3" />
-                      pr-{p.prNumber}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={p.status} />
-                  </TableCell>
-                  <TableCell className="max-w-[260px]">
-                    <a
-                      href={p.previewUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 text-sm font-mono truncate hover:underline underline-offset-4 cursor-pointer"
-                    >
-                      <ExternalLink className="w-3 h-3 shrink-0" />
-                      {p.previewUrl.replace(/^https?:\/\//, "")}
-                    </a>
-                  </TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground tabular-nums">
-                    {timeAgo(p.createdAt)}
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="w-8 h-8 text-muted-foreground hover:text-red-500"
-                      disabled={tearingDown === p.dseq}
-                      onClick={() => teardown(p.dseq)}
-                      aria-label="Teardown"
-                    >
-                      {tearingDown === p.dseq ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              {previews.map((p) => {
+                const id = `pr-${p.prNumber}`;
+                return (
+                  <TableRow key={id}>
+                    <TableCell className="font-mono font-medium">#{p.prNumber}</TableCell>
+                    <TableCell>
+                      <div className="text-sm font-medium">{p.repo}</div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                        <GitBranch className="w-3 h-3" />
+                        pr-{p.prNumber}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <PhaseBadge p={p} />
+                    </TableCell>
+                    <TableCell className="max-w-[280px]">
+                      {p.phase === "live" ? (
+                        <a
+                          href={p.previewUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-sm font-mono truncate hover:underline underline-offset-4 cursor-pointer"
+                        >
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          {p.previewUrl.replace(/^https?:\/\//, "")}
+                        </a>
+                      ) : p.phase === "failed" ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-red-500 truncate" title={p.error}>
+                            {p.error ?? "Build failed"}
+                          </span>
+                          {p.buildRunUrl && <LogsLink href={p.buildRunUrl} />}
+                        </div>
                       ) : (
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-mono text-muted-foreground truncate">
+                            {p.previewUrl.replace(/^https?:\/\//, "")}
+                          </span>
+                          {p.buildRunUrl && <LogsLink href={p.buildRunUrl} />}
+                        </div>
                       )}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="text-right text-sm text-muted-foreground tabular-nums">
+                      {timeAgo(p.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-8 h-8 text-muted-foreground hover:text-red-500"
+                        disabled={tearingDown === id}
+                        onClick={() => teardown(id)}
+                        aria-label="Teardown"
+                      >
+                        {tearingDown === id ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
       )}
     </div>
+  );
+}
+
+function LogsLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-1 text-xs text-muted-foreground hover:underline underline-offset-4 shrink-0"
+    >
+      <FileText className="w-3 h-3" />
+      logs
+    </a>
   );
 }
 
@@ -264,7 +307,7 @@ function EmptyState() {
         <ServerOff className="w-10 h-10 text-muted-foreground mb-4" strokeWidth={1.25} />
         <p className="text-sm font-medium mb-1">No active previews</p>
         <p className="text-xs text-muted-foreground max-w-xs">
-          Paste a GitHub PR URL above to deploy a preview on Akash Network.
+          Paste a GitHub PR URL above to build and deploy a preview on Akash Network.
         </p>
       </div>
     </div>

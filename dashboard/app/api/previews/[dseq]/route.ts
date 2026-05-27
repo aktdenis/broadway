@@ -13,9 +13,18 @@ export async function DELETE(
   }
 
   const client = new AkashConsoleClient(apiKey);
-  await client.closeDeployment(dseq);
-
-  const record = allRecords().find((r) => r.dseq === dseq);
+  // `dseq` param may be a real dseq (live preview) or "pr-<n>" (still building).
+  const record = allRecords().find(
+    (r) => r.dseq === dseq || `pr-${r.prNumber}` === dseq
+  );
+  const toClose = record?.dseq ?? (/^\d+$/.test(dseq) ? dseq : undefined);
+  if (toClose) {
+    try {
+      await client.closeDeployment(toClose);
+    } catch {
+      // deployment may not exist yet; deleting the record is enough
+    }
+  }
   if (record) deleteRecord(record.repo, record.prNumber);
 
   return NextResponse.json({ success: true });

@@ -42,11 +42,12 @@ deployment:
 `;
 }
 
+const PREVIEW_IMAGE = "ghcr.io/aktdenis/website-preview";
+
 /**
- * Returns the Docker image ref for a given PR number.
- * Matches what the GitHub Actions workflow pushes to ghcr.io.
+ * Returns the Docker image ref for a given PR number. Matches what the fork's
+ * preview-build workflow pushes to ghcr.io.
  */
-export function prImageRef(repo: string, prNumber: number): string {
-  const [org, name] = repo.toLowerCase().split("/");
-  return `ghcr.io/${org}/${name}:pr-${prNumber}`;
+export function prImageRef(prNumber: number): string {
+  return `${PREVIEW_IMAGE}:pr-${prNumber}`;
 }

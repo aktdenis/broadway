@@ -1,16 +1,22 @@
 import fs from "fs";
 import path from "path";
 
+export type PreviewPhase = "building" | "deploying" | "live" | "failed";
+
 export interface PreviewRecord {
   repo: string;
   prNumber: number;
-  dseq: string;
-  gseq: number;
-  oseq: number;
-  provider: string;
-  providerUrl: string; // raw Akash provider URL, used for proxying
-  previewUrl: string;  // public custom-domain URL, e.g. https://pr-247.broadway.akash.world
+  phase: PreviewPhase;
+  previewUrl: string; // public custom-domain URL, e.g. https://pr-247.akash.world
   createdAt: string;
+  buildRunUrl?: string; // link to the GitHub Actions build run
+  error?: string; // failure reason when phase === "failed"
+  // Populated once the Akash deployment exists (deploying/live):
+  dseq?: string;
+  gseq?: number;
+  oseq?: number;
+  provider?: string;
+  providerUrl?: string; // raw Akash provider URL, used for proxying
   // Optional cached values — used as fallback when Akash API is unreachable
   status?: string;
   monthlyUsd?: number;
@@ -41,6 +47,15 @@ export function getRecord(repo: string, prNumber: number): PreviewRecord | undef
 export function upsertRecord(record: PreviewRecord): void {
   const data = load();
   data[key(record.repo, record.prNumber)] = record;
+  save(data);
+}
+
+/** Merge a partial update into an existing record (no-op if it's gone). */
+export function patchRecord(repo: string, prNumber: number, patch: Partial<PreviewRecord>): void {
+  const data = load();
+  const k = key(repo, prNumber);
+  if (!data[k]) return;
+  data[k] = { ...data[k], ...patch };
   save(data);
 }
 

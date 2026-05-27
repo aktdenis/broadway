@@ -13,6 +13,8 @@ export async function GET() {
 
   const enriched = await Promise.all(
     records.map(async (r) => {
+      // Only live previews have an Akash deployment to enrich.
+      if (r.phase !== "live" || !r.dseq) return r;
       try {
         const info = await client.getDeployment(r.dseq);
         const lease = info.leases[0];
