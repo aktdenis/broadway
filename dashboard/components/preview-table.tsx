@@ -156,6 +156,7 @@ export function PreviewTable() {
   const [loading, setLoading] = useState(true);
   const [refreshing, startRefresh] = useTransition();
   const [tearingDown, setTearingDown] = useState<string | null>(null);
+  const [teardownError, setTeardownError] = useState<string | null>(null);
   const [token, setToken] = useState("");
 
   useEffect(() => {
@@ -165,6 +166,7 @@ export function PreviewTable() {
   function saveToken(t: string) {
     setToken(t);
     localStorage.setItem(TOKEN_KEY, t);
+    setTeardownError(null);
   }
 
   async function load() {
@@ -186,13 +188,25 @@ export function PreviewTable() {
   }, []);
 
   async function teardown(id: string) {
+    setTeardownError(null);
+    if (!token.trim()) {
+      setTeardownError("Enter the deploy password first.");
+      return;
+    }
     setTearingDown(id);
     try {
-      await fetch(`/api/previews/${id}`, {
+      const res = await fetch(`/api/previews/${id}`, {
         method: "DELETE",
         headers: { "x-deploy-token": token },
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setTeardownError(data.error ?? `Delete failed (${res.status})`);
+        return;
+      }
       await load();
+    } catch {
+      setTeardownError("Network error — could not delete preview.");
     } finally {
       setTearingDown(null);
     }
@@ -210,6 +224,13 @@ export function PreviewTable() {
   return (
     <div className="space-y-6">
       <DeployForm token={token} onToken={saveToken} onDeployed={() => startRefresh(load)} />
+
+      {teardownError && (
+        <p className="text-xs text-red-500 flex items-center gap-1">
+          <AlertCircle className="w-3 h-3 shrink-0" />
+          {teardownError}
+        </p>
+      )}
 
       <div className="flex items-center justify-between">
         <span className="text-sm">
