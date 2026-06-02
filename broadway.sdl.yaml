@@ -19,6 +19,7 @@ services:
       - BROADWAY_DOMAIN=akash.world
       - MAX_PREVIEWS=8
       - EXCLUDE_PROVIDERS=
+      - PREFER_PROVIDER=
     params:
       storage:
         data:

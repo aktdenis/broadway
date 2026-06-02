@@ -125,26 +125,50 @@ export class AkashConsoleClient {
     return res.data.data;
   }
 
-  /** Wait up to maxWaitMs for at least one open bid, then return the cheapest non-excluded. */
+  /**
+   * Wait up to maxWaitMs for at least one open bid, then return the best one.
+   *
+   * Selection order:
+   *   1. If preferProvider is set and has an open bid → always pick it.
+   *   2. Otherwise pick the cheapest bid among non-excluded providers.
+   *
+   * Preferred provider bids are accepted on the first poll they appear;
+   * non-preferred bids wait the full duration so the preferred provider has
+   * time to submit a bid before we fall back.
+   */
   async waitForBid(
     dseq: string,
     maxWaitMs = 60_000,
     pollMs = 5_000,
-    excludeProviders: string[] = []
+    excludeProviders: string[] = [],
+    preferProvider = ""
   ): Promise<BidItem["bid"]> {
     const deadline = Date.now() + maxWaitMs;
+    let fallbackBid: BidItem["bid"] | null = null;
+
     while (Date.now() < deadline) {
       const bids = await this.getBids(dseq);
       const open = bids
         .filter((b) => b.bid.state === "open")
         .filter((b) => !excludeProviders.includes(b.bid.id.provider));
+
+      if (preferProvider) {
+        const preferred = open.find((b) => b.bid.id.provider === preferProvider);
+        if (preferred) return preferred.bid;
+      }
+
+      // Keep the cheapest non-preferred bid in case preferred never bids.
       if (open.length > 0) {
-        return open.reduce((best, b) =>
+        fallbackBid = open.reduce((best, b) =>
           parseFloat(b.bid.price.amount) < parseFloat(best.bid.price.amount) ? b : best
         ).bid;
       }
+
       await sleep(pollMs);
     }
+
+    // Preferred never appeared — use cheapest fallback if we have one.
+    if (fallbackBid) return fallbackBid;
     throw new Error(`No open bids received for dseq ${dseq} within ${maxWaitMs}ms`);
   }
 

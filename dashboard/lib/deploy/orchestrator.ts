@@ -65,7 +65,8 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
     console.log(`[deploy] Deployment created: dseq=${dseq}`);
 
     const excludeProviders = (process.env.EXCLUDE_PROVIDERS ?? "").split(",").filter(Boolean);
-    const bid = await akashClient.waitForBid(dseq, 90_000, 5_000, excludeProviders);
+    const preferProvider = process.env.PREFER_PROVIDER ?? "";
+    const bid = await akashClient.waitForBid(dseq, 90_000, 5_000, excludeProviders, preferProvider);
     await akashClient.createLease(manifest, dseq, bid.id.gseq, bid.id.oseq, bid.id.provider);
     console.log(`[deploy] Lease created with provider=${bid.id.provider}`);
 
