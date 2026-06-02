@@ -26,13 +26,13 @@ profiles:
         memory:
           size: 256Mi
         storage:
-          - size: 1Gi
+          - size: 4Gi
   placement:
     dcloud:
       pricing:
         preview:
           denom: uusd
-          amount: 500
+          amount: 700
 
 deployment:
   preview:
