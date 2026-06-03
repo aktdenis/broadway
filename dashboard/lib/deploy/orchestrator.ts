@@ -15,18 +15,58 @@ export interface DeployResult {
   previewUrl: string;
 }
 
+/**
+ * Deploy the Akash portion only (create deployment → bid → lease → URI).
+ * Called by both deployPreview() and retryDeploy().
+ */
+async function deployToAkash(
+  repo: string,
+  prNumber: number,
+  imageRef: string,
+  akashClient: AkashConsoleClient,
+  depositUsd: number
+): Promise<{ dseq: string; previewUrl: string }> {
+  const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
+  const previewUrl = `https://pr-${prNumber}.${domain}`;
+
+  patchRecord(repo, prNumber, { phase: "deploying", imageRef });
+  const sdl = buildPreviewSdl(imageRef);
+
+  const { dseq, manifest } = await akashClient.createDeployment(sdl, depositUsd);
+  patchRecord(repo, prNumber, { dseq });
+  console.log(`[deploy] Deployment created: dseq=${dseq}`);
+
+  const excludeProviders = (process.env.EXCLUDE_PROVIDERS ?? "").split(",").filter(Boolean);
+  const preferProvider = process.env.PREFER_PROVIDER ?? "";
+  const bid = await akashClient.waitForBid(dseq, 90_000, 5_000, excludeProviders, preferProvider);
+  await akashClient.createLease(manifest, dseq, bid.id.gseq, bid.id.oseq, bid.id.provider);
+  console.log(`[deploy] Lease created with provider=${bid.id.provider}`);
+
+  const providerUrl = await akashClient.waitForServiceUri(dseq);
+  console.log(`[deploy] Preview live at: ${previewUrl}`);
+
+  patchRecord(repo, prNumber, {
+    phase: "live",
+    dseq,
+    gseq: bid.id.gseq,
+    oseq: bid.id.oseq,
+    provider: bid.id.provider,
+    providerUrl,
+  });
+
+  return { dseq, previewUrl };
+}
+
 export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployResult> {
   const { repo, prNumber, akashClient, depositUsd = 2.0 } = opts;
 
   const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
   const previewUrl = `https://pr-${prNumber}.${domain}`;
 
-  // Capture any existing deployment for this PR so we can close it after
-  // recording the new build — re-deploys must not orphan the old Akash lease.
+  // Capture any existing deployment so we can close it before re-deploying.
   const prev = getRecord(repo, prNumber);
 
-  // Record immediately so the dashboard shows progress — and so any early
-  // failure (e.g. missing token) surfaces as a visible "failed" row.
+  // Record immediately so the dashboard shows progress.
   upsertRecord({
     repo,
     prNumber,
@@ -48,44 +88,53 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new Error("GITHUB_TOKEN not set");
 
-    // 1. Build the PR into an image via the fork's GitHub Actions workflow.
+    // 1. Build the PR image via GitHub Actions.
     console.log(`[deploy] Triggering build for ${repo} PR #${prNumber}…`);
     const run = await startBuild(prNumber, token);
     patchRecord(repo, prNumber, { buildRunUrl: run.htmlUrl });
     await awaitBuild(run.id, token);
     console.log(`[deploy] Build complete`);
 
-    // 2. Deploy the freshly built image to Akash.
-    patchRecord(repo, prNumber, { phase: "deploying" });
+    // 2. Deploy to Akash.
     const imageRef = prImageRef(prNumber, run.id);
-    const sdl = buildPreviewSdl(imageRef);
-
-    const { dseq, manifest } = await akashClient.createDeployment(sdl, depositUsd);
-    patchRecord(repo, prNumber, { dseq });
-    console.log(`[deploy] Deployment created: dseq=${dseq}`);
-
-    const excludeProviders = (process.env.EXCLUDE_PROVIDERS ?? "").split(",").filter(Boolean);
-    const preferProvider = process.env.PREFER_PROVIDER ?? "";
-    const bid = await akashClient.waitForBid(dseq, 90_000, 5_000, excludeProviders, preferProvider);
-    await akashClient.createLease(manifest, dseq, bid.id.gseq, bid.id.oseq, bid.id.provider);
-    console.log(`[deploy] Lease created with provider=${bid.id.provider}`);
-
-    const providerUrl = await akashClient.waitForServiceUri(dseq);
-    console.log(`[deploy] Preview live at: ${previewUrl}`);
-
-    patchRecord(repo, prNumber, {
-      phase: "live",
-      dseq,
-      gseq: bid.id.gseq,
-      oseq: bid.id.oseq,
-      provider: bid.id.provider,
-      providerUrl,
-    });
-
-    return { dseq, previewUrl };
+    return await deployToAkash(repo, prNumber, imageRef, akashClient, depositUsd);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[deploy] Failed for ${repo} PR #${prNumber}: ${msg}`);
+    patchRecord(repo, prNumber, { phase: "failed", error: msg });
+    throw err;
+  }
+}
+
+/**
+ * Retry the Akash deployment for a PR that already has a successful build.
+ * Skips the build step entirely — reuses the imageRef stored from the last run.
+ */
+export async function retryDeploy(opts: DeployPreviewOptions): Promise<DeployResult> {
+  const { repo, prNumber, akashClient, depositUsd = 2.0 } = opts;
+
+  const record = getRecord(repo, prNumber);
+  if (!record?.imageRef) {
+    throw new Error("No successful build found for this PR — run a full deploy first.");
+  }
+
+  // Close any stale Akash deployment.
+  if (record.dseq) {
+    try {
+      await akashClient.closeDeployment(record.dseq);
+      console.log(`[retry] Closed stale dseq=${record.dseq}`);
+    } catch {
+      // Already closed or not found — fine.
+    }
+  }
+
+  console.log(`[retry] Re-deploying PR #${prNumber} with existing image ${record.imageRef}`);
+
+  try {
+    return await deployToAkash(repo, prNumber, record.imageRef, akashClient, depositUsd);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[retry] Failed for ${repo} PR #${prNumber}: ${msg}`);
     patchRecord(repo, prNumber, { phase: "failed", error: msg });
     throw err;
   }

@@ -31,6 +31,7 @@ interface Preview {
   phase: Phase;
   previewUrl: string;
   buildRunUrl?: string;
+  imageRef?: string;   // set after a successful build; enables retry-deploy
   error?: string;
   dseq?: string;
   provider?: string;
@@ -157,6 +158,7 @@ export function PreviewTable() {
   const [refreshing, startRefresh] = useTransition();
   const [tearingDown, setTearingDown] = useState<string | null>(null);
   const [teardownError, setTeardownError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<number | null>(null);
   const [token, setToken] = useState("");
 
   useEffect(() => {
@@ -186,6 +188,30 @@ export function PreviewTable() {
     const id = setInterval(load, 10_000);
     return () => clearInterval(id);
   }, []);
+
+  async function retryDeployment(prNumber: number) {
+    setTeardownError(null);
+    if (!token.trim()) {
+      setTeardownError("Enter the deploy password first.");
+      return;
+    }
+    setRetrying(prNumber);
+    try {
+      const res = await fetch(`/api/previews/${prNumber}/retry`, {
+        method: "POST",
+        headers: { "x-deploy-token": token },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setTeardownError(data.error ?? `Retry failed (${res.status})`);
+      }
+      // Success: poll will pick up the deploying→live transition.
+    } catch {
+      setTeardownError("Network error — could not retry deployment.");
+    } finally {
+      setRetrying(null);
+    }
+  }
 
   async function teardown(id: string) {
     setTeardownError(null);
@@ -298,6 +324,22 @@ export function PreviewTable() {
                             {p.error ?? "Build failed"}
                           </span>
                           {p.buildRunUrl && <LogsLink href={p.buildRunUrl} />}
+                          {p.imageRef && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-2 text-xs shrink-0"
+                              disabled={retrying === p.prNumber}
+                              onClick={() => retryDeployment(p.prNumber)}
+                              title="Build succeeded — retry Akash deployment without rebuilding"
+                            >
+                              {retrying === p.prNumber ? (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              ) : (
+                                "Retry Deploy"
+                              )}
+                            </Button>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">

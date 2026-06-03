@@ -37,6 +37,8 @@ export async function GET(
     const upstream = await fetch(target, {
       headers: { accept: request.headers.get("accept") ?? "*/*" },
       redirect: "follow",
+      // Fail fast so hairpin-NAT hangs don't hold up the request for 100s.
+      signal: AbortSignal.timeout(15_000),
     });
 
     const body = await upstream.arrayBuffer();
@@ -46,6 +48,11 @@ export async function GET(
 
     return new NextResponse(body, { status: upstream.status, headers });
   } catch {
-    return new NextResponse("Preview unavailable", { status: 502 });
+    // Proxy failed (most likely hairpin NAT: preview and Broadway are on the
+    // same Akash provider, so the ingress can't route the request back to
+    // itself). Return a 307 redirect to the raw provider URL. The Cloudflare
+    // Worker uses redirect:"follow" and will re-fetch the URL from outside the
+    // Akash network where it is reachable, then stream the result to the browser.
+    return NextResponse.redirect(target, 307);
   }
 }
