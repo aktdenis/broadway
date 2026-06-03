@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, statSync } from "fs";
 import path from "path";
 import { allRecords } from "@/lib/deploy/store";
 import { mimeType } from "@/lib/deploy/file-store";
@@ -86,8 +86,9 @@ function serveFromDisk(
   if (!resolved) {
     // Serve the generated 404 page if available.
     const notFoundPage = path.join(filesPath, "404.html");
-    if (existsSync(notFoundPage)) {
-      return new NextResponse(readFileSync(notFoundPage), {
+    const nf = tryFile(notFoundPage);
+    if (nf) {
+      return new NextResponse(readFileSync(nf), {
         status: 404,
         headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
       });
@@ -109,15 +110,17 @@ function serveFromDisk(
   return new NextResponse(readFileSync(resolved), { headers });
 }
 
-/** Try a sequence of candidate paths and return the first one that exists. */
+/** Return the path if it exists AND is a regular file (not a directory). */
+function tryFile(p: string): string | null {
+  try { return statSync(p).isFile() ? p : null; } catch { return null; }
+}
+
+/** Try candidate paths in order; return the first that is a real file. */
 function resolveFile(candidate: string): string | null {
-  const attempts = [
-    candidate,                            // exact path (file or .html)
-    `${candidate}/index.html`,            // directory → index.html
-    `${candidate}.html`,                  // /about → about.html
-  ];
-  for (const p of attempts) {
-    if (existsSync(p)) return p;
-  }
-  return null;
+  return (
+    tryFile(candidate) ??                      // exact file match
+    tryFile(`${candidate}/index.html`) ??      // directory → index.html
+    tryFile(`${candidate}.html`) ??            // /about → about.html
+    null
+  );
 }
