@@ -15,6 +15,7 @@ services:
       - WEBHOOK_SECRET=
       - DEPLOY_TOKEN=
       - STORE_PATH=/data/deployments.json
+      - PREVIEWS_ROOT=/data/previews
       - NODE_ENV=production
       - BROADWAY_DOMAIN=akash.world
       - MAX_PREVIEWS=8
@@ -34,9 +35,9 @@ profiles:
         memory:
           size: 512Mi
         storage:
-          - size: 1Gi
+          - size: 2Gi
           - name: data
-            size: 1Gi
+            size: 20Gi
             attributes:
               persistent: true
               class: beta3

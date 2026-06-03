@@ -9,6 +9,8 @@ RUN npm run build
 
 # --- production image ---
 FROM node:20-alpine AS runner
+# unzip is required to extract GitHub Actions artifacts (preview static files)
+RUN apk add --no-cache unzip
 WORKDIR /app
 
 ENV NODE_ENV=production

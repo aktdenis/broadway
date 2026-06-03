@@ -10,7 +10,8 @@ export interface PreviewRecord {
   previewUrl: string; // public custom-domain URL, e.g. https://pr-247.akash.world
   createdAt: string;
   buildRunUrl?: string; // link to the GitHub Actions build run
-  imageRef?: string;    // ghcr.io image ref set after a successful build (allows retry-deploy without rebuild)
+  imageRef?: string;    // ghcr.io image ref — kept for backward compat with old Akash-container previews
+  filesPath?: string;   // absolute path on Broadway's disk where preview static files are extracted
   error?: string; // failure reason when phase === "failed"
   // Populated once the Akash deployment exists (deploying/live):
   dseq?: string;

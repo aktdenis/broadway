@@ -85,6 +85,32 @@ export async function awaitBuild(runId: number, token: string, maxWaitMs = 900_0
   throw new Error("Build did not complete within 15 minutes");
 }
 
+/**
+ * Returns the zip download URL for the first artifact matching `preview-{prNumber}-`
+ * in the given run. GitHub redirects this URL to a pre-signed CDN URL.
+ */
+export async function getArtifactUrl(
+  runId: number,
+  prNumber: number,
+  token: string
+): Promise<string> {
+  const res = await fetch(
+    `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/runs/${runId}/artifacts`,
+    { headers: headers(token) }
+  );
+  const data = await res.json();
+  const artifact = (data.artifacts ?? []).find((a: { name: string }) =>
+    a.name.startsWith(`preview-${prNumber}-`)
+  );
+  if (!artifact) {
+    throw new Error(
+      `No artifact found for PR #${prNumber} in run ${runId}. ` +
+      `Available: ${(data.artifacts ?? []).map((a: { name: string }) => a.name).join(", ")}`
+    );
+  }
+  return `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/artifacts/${artifact.id}/zip`;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }

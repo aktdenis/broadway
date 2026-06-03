@@ -1,72 +1,55 @@
+/**
+ * Preview deployment orchestrator.
+ *
+ * New architecture (file-based):
+ *   1. Trigger GitHub Actions build in the fork
+ *   2. Wait for build to finish
+ *   3. Download the GitHub artifact (static site zip) onto Broadway's disk
+ *   4. Mark preview as live — Broadway serves the files directly
+ *
+ * No separate Akash container is deployed per PR. This eliminates provider
+ * reliability issues, hairpin-NAT problems, and the 500 MB image extraction
+ * lottery that was causing 404s across multiple providers.
+ *
+ * Old Akash-container previews (providerUrl set, no filesPath) are still
+ * proxied for backward compatibility.
+ */
+
 import { AkashConsoleClient } from "@/lib/akash/client";
-import { buildPreviewSdl, prImageRef } from "@/lib/akash/sdl";
-import { startBuild, awaitBuild } from "@/lib/github-build";
+import { startBuild, awaitBuild, getArtifactUrl } from "@/lib/github-build";
 import { upsertRecord, patchRecord, deleteRecord, getRecord } from "@/lib/deploy/store";
+import { downloadAndExtract, deletePreviewFiles } from "@/lib/deploy/file-store";
 
 export interface DeployPreviewOptions {
-  repo: string;        // e.g. "akash-network/website"
+  repo: string;
   prNumber: number;
   akashClient: AkashConsoleClient;
-  depositUsd?: number; // defaults to $2.00
+  depositUsd?: number; // kept for interface compat, unused in file-based flow
 }
 
 export interface DeployResult {
-  dseq: string;
   previewUrl: string;
 }
 
-/**
- * Deploy the Akash portion only (create deployment → bid → lease → URI).
- * Called by both deployPreview() and retryDeploy().
- */
-async function deployToAkash(
-  repo: string,
-  prNumber: number,
-  imageRef: string,
-  akashClient: AkashConsoleClient,
-  depositUsd: number
-): Promise<{ dseq: string; previewUrl: string }> {
-  const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
-  const previewUrl = `https://pr-${prNumber}.${domain}`;
-
-  patchRecord(repo, prNumber, { phase: "deploying", imageRef });
-  const sdl = buildPreviewSdl(imageRef);
-
-  const { dseq, manifest } = await akashClient.createDeployment(sdl, depositUsd);
-  patchRecord(repo, prNumber, { dseq });
-  console.log(`[deploy] Deployment created: dseq=${dseq}`);
-
-  const excludeProviders = (process.env.EXCLUDE_PROVIDERS ?? "").split(",").filter(Boolean);
-  const preferProvider = process.env.PREFER_PROVIDER ?? "";
-  const bid = await akashClient.waitForBid(dseq, 90_000, 5_000, excludeProviders, preferProvider);
-  await akashClient.createLease(manifest, dseq, bid.id.gseq, bid.id.oseq, bid.id.provider);
-  console.log(`[deploy] Lease created with provider=${bid.id.provider}`);
-
-  const providerUrl = await akashClient.waitForServiceUri(dseq);
-  console.log(`[deploy] Preview live at: ${previewUrl}`);
-
-  patchRecord(repo, prNumber, {
-    phase: "live",
-    dseq,
-    gseq: bid.id.gseq,
-    oseq: bid.id.oseq,
-    provider: bid.id.provider,
-    providerUrl,
-  });
-
-  return { dseq, previewUrl };
-}
-
 export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployResult> {
-  const { repo, prNumber, akashClient, depositUsd = 2.0 } = opts;
+  const { repo, prNumber } = opts;
 
   const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
   const previewUrl = `https://pr-${prNumber}.${domain}`;
 
-  // Capture any existing deployment so we can close it before re-deploying.
+  // Close any previous Akash deployment for this PR (old architecture).
   const prev = getRecord(repo, prNumber);
+  if (prev?.dseq) {
+    try {
+      await opts.akashClient.closeDeployment(prev.dseq);
+      console.log(`[deploy] Closed old Akash deployment dseq=${prev.dseq}`);
+    } catch { /* already closed */ }
+  }
+  // Clean up old preview files if any.
+  if (prev?.prNumber) {
+    deletePreviewFiles(prev.prNumber);
+  }
 
-  // Record immediately so the dashboard shows progress.
   upsertRecord({
     repo,
     prNumber,
@@ -75,29 +58,33 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
     createdAt: new Date().toISOString(),
   });
 
-  if (prev?.dseq) {
-    try {
-      await akashClient.closeDeployment(prev.dseq);
-      console.log(`[deploy] Closed previous dseq=${prev.dseq} before re-deploy`);
-    } catch (e) {
-      console.error(`[deploy] Could not close previous dseq ${prev.dseq}:`, e);
-    }
-  }
-
   try {
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new Error("GITHUB_TOKEN not set");
 
-    // 1. Build the PR image via GitHub Actions.
+    // 1. Trigger build.
     console.log(`[deploy] Triggering build for ${repo} PR #${prNumber}…`);
     const run = await startBuild(prNumber, token);
     patchRecord(repo, prNumber, { buildRunUrl: run.htmlUrl });
-    await awaitBuild(run.id, token);
-    console.log(`[deploy] Build complete`);
 
-    // 2. Deploy to Akash.
-    const imageRef = prImageRef(prNumber, run.id);
-    return await deployToAkash(repo, prNumber, imageRef, akashClient, depositUsd);
+    await awaitBuild(run.id, token);
+    console.log(`[deploy] Build complete (run ${run.id})`);
+
+    // 2. Download artifact and extract to Broadway's persistent volume.
+    patchRecord(repo, prNumber, { phase: "deploying" });
+    console.log(`[deploy] Downloading preview artifact…`);
+
+    const artifactUrl = await getArtifactUrl(run.id, prNumber, token);
+    const filesPath = await downloadAndExtract(artifactUrl, prNumber, token);
+
+    // 3. Mark live — no Akash deployment needed.
+    patchRecord(repo, prNumber, {
+      phase: "live",
+      filesPath,
+    });
+
+    console.log(`[deploy] PR #${prNumber} live at ${previewUrl} (files: ${filesPath})`);
+    return { previewUrl };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[deploy] Failed for ${repo} PR #${prNumber}: ${msg}`);
@@ -107,34 +94,39 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
 }
 
 /**
- * Retry the Akash deployment for a PR that already has a successful build.
- * Skips the build step entirely — reuses the imageRef stored from the last run.
+ * Retry just the download+extract step when a build already succeeded.
+ * Useful if the artifact download failed or files got corrupted.
  */
 export async function retryDeploy(opts: DeployPreviewOptions): Promise<DeployResult> {
-  const { repo, prNumber, akashClient, depositUsd = 2.0 } = opts;
+  const { repo, prNumber } = opts;
 
   const record = getRecord(repo, prNumber);
-  if (!record?.imageRef) {
+  if (!record?.buildRunUrl) {
     throw new Error("No successful build found for this PR — run a full deploy first.");
   }
 
-  // Close any stale Akash deployment.
-  if (record.dseq) {
-    try {
-      await akashClient.closeDeployment(record.dseq);
-      console.log(`[retry] Closed stale dseq=${record.dseq}`);
-    } catch {
-      // Already closed or not found — fine.
-    }
-  }
+  // Extract run ID from the build URL.
+  const runIdMatch = record.buildRunUrl.match(/runs\/(\d+)/);
+  if (!runIdMatch) throw new Error("Could not parse run ID from buildRunUrl");
+  const runId = parseInt(runIdMatch[1], 10);
 
-  console.log(`[retry] Re-deploying PR #${prNumber} with existing image ${record.imageRef}`);
+  console.log(`[retry] Re-downloading artifact for PR #${prNumber} from run ${runId}`);
+  patchRecord(repo, prNumber, { phase: "deploying", error: undefined });
 
   try {
-    return await deployToAkash(repo, prNumber, record.imageRef, akashClient, depositUsd);
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) throw new Error("GITHUB_TOKEN not set");
+
+    const artifactUrl = await getArtifactUrl(runId, prNumber, token);
+    const filesPath = await downloadAndExtract(artifactUrl, prNumber, token);
+
+    const domain = process.env.BROADWAY_DOMAIN ?? "akash.world";
+    patchRecord(repo, prNumber, { phase: "live", filesPath });
+
+    console.log(`[retry] PR #${prNumber} live (files: ${filesPath})`);
+    return { previewUrl: `https://pr-${prNumber}.${domain}` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[retry] Failed for ${repo} PR #${prNumber}: ${msg}`);
     patchRecord(repo, prNumber, { phase: "failed", error: msg });
     throw err;
   }
@@ -146,15 +138,18 @@ export async function teardownPreview(
   akashClient: AkashConsoleClient
 ): Promise<void> {
   const record = getRecord(repo, prNumber);
-  if (!record) {
-    console.log(`[teardown] No active preview for ${repo} PR #${prNumber}`);
-    return;
+  if (!record) return;
+
+  // Close Akash deployment if this was an old container-based preview.
+  if (record.dseq) {
+    try {
+      await akashClient.closeDeployment(record.dseq);
+    } catch { /* already closed */ }
   }
 
-  if (record.dseq) {
-    console.log(`[teardown] Closing deployment dseq=${record.dseq}`);
-    await akashClient.closeDeployment(record.dseq);
-  }
+  // Delete static files from disk.
+  deletePreviewFiles(prNumber);
+
   deleteRecord(repo, prNumber);
-  console.log(`[teardown] Done`);
+  console.log(`[teardown] PR #${prNumber} torn down`);
 }
