@@ -37,7 +37,6 @@ export async function downloadAndExtract(
       Accept: "application/vnd.github+json",
     },
     redirect: "follow",
-    // @ts-expect-error – Node 20 fetch does not expose signal typing here
     signal: AbortSignal.timeout(600_000), // 10 min max
   });
 
