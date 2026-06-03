@@ -6,14 +6,14 @@ import { authorized, ALLOWED_REPO } from "@/lib/auth";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: Promise<{ pr: string }> }
+  { params }: { params: Promise<{ dseq: string }> }
 ) {
   if (!authorized(req)) {
     return NextResponse.json({ error: "Wrong or missing deploy password" }, { status: 401 });
   }
 
-  const { pr } = await params;
-  const prNumber = parseInt(pr, 10);
+  const { dseq } = await params;
+  const prNumber = parseInt(dseq, 10);
   if (isNaN(prNumber)) {
     return NextResponse.json({ error: "Invalid PR number" }, { status: 400 });
   }
