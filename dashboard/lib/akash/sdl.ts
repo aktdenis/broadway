@@ -26,7 +26,7 @@ profiles:
         memory:
           size: 256Mi
         storage:
-          - size: 4Gi
+          - size: 8Gi
   placement:
     dcloud:
       pricing:
@@ -48,6 +48,14 @@ const PREVIEW_IMAGE = "ghcr.io/aktdenis/website-preview";
  * Returns the Docker image ref for a given PR number. Matches what the fork's
  * preview-build workflow pushes to ghcr.io.
  */
-export function prImageRef(prNumber: number): string {
-  return `${PREVIEW_IMAGE}:pr-${prNumber}`;
+/**
+ * Returns the Docker image ref for a given PR number.
+ * When runId is supplied we use the run-specific tag (pr-N-{runId}) so
+ * each deployment always forces a fresh image pull on the provider — no
+ * stale cached layers from a previous failed deployment.
+ */
+export function prImageRef(prNumber: number, runId?: number): string {
+  return runId
+    ? `${PREVIEW_IMAGE}:pr-${prNumber}-${runId}`
+    : `${PREVIEW_IMAGE}:pr-${prNumber}`;
 }

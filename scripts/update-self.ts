@@ -38,7 +38,8 @@ async function main() {
     .replace("- GITHUB_TOKEN=", `- GITHUB_TOKEN=${githubToken}`)
     .replace("- WEBHOOK_SECRET=", `- WEBHOOK_SECRET=${webhookSecret}`)
     .replace("- DEPLOY_TOKEN=", `- DEPLOY_TOKEN=${process.env.DEPLOY_TOKEN ?? ""}`)
-    .replace("- EXCLUDE_PROVIDERS=", `- EXCLUDE_PROVIDERS=${process.env.EXCLUDE_PROVIDERS ?? ""}`);
+    .replace("- EXCLUDE_PROVIDERS=", `- EXCLUDE_PROVIDERS=${process.env.EXCLUDE_PROVIDERS ?? ""}`)
+    .replace("- PREFER_PROVIDER=", `- PREFER_PROVIDER=${process.env.PREFER_PROVIDER ?? ""}`);
 
   const client = new AkashConsoleClient(apiKey!);
 

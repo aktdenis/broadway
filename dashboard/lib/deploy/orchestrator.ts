@@ -57,7 +57,7 @@ export async function deployPreview(opts: DeployPreviewOptions): Promise<DeployR
 
     // 2. Deploy the freshly built image to Akash.
     patchRecord(repo, prNumber, { phase: "deploying" });
-    const imageRef = prImageRef(prNumber);
+    const imageRef = prImageRef(prNumber, run.id);
     const sdl = buildPreviewSdl(imageRef);
 
     const { dseq, manifest } = await akashClient.createDeployment(sdl, depositUsd);
