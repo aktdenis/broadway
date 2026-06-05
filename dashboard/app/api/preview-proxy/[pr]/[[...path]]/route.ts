@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, statSync } from "fs";
+import { stat, readFile } from "fs/promises";
 import path from "path";
 import { allRecords } from "@/lib/deploy/store";
 import { mimeType } from "@/lib/deploy/file-store";
@@ -10,12 +10,9 @@ export async function GET(
 ) {
   const { pr, path: segments } = await params;
   const records = allRecords();
-  // pr param is a slug: "pr-1233", "branch-my-feature", or bare "1233" (old Worker).
-  // Old store records have prNumber but no slug field — handle all three cases.
-  const prNum = pr.startsWith("pr-")
-    ? parseInt(pr.slice(3), 10)   // "pr-1233" → 1233
-    : parseInt(pr, 10);           // "1233" → 1233 (legacy), "branch-*" → NaN
 
+  // pr param is a slug: "pr-1233", "branch-my-feature", or bare "1233" (old Worker).
+  const prNum = pr.startsWith("pr-") ? parseInt(pr.slice(3), 10) : parseInt(pr, 10);
   const record =
     records.find((r) => r.slug === pr) ??
     (!isNaN(prNum) ? records.find((r) => r.prNumber === prNum) : undefined);
@@ -24,28 +21,18 @@ export async function GET(
     return new NextResponse("Preview not found", { status: 404 });
   }
 
-  // ── FILE-BASED (new architecture) ──────────────────────────────────────────
-  // Static files were extracted to Broadway's disk after the build.
-  // Serve them directly — no Akash container involved.
+  // ── FILE-BASED (current architecture) ────────────────────────────────────
   if (record.filesPath) {
     return serveFromDisk(record.filesPath, segments ?? [], request);
   }
 
-  // ── CONTAINER-BASED (old architecture, backward compat) ────────────────────
+  // ── CONTAINER-BASED (backward compat) ────────────────────────────────────
   if (!record.providerUrl) {
     return new NextResponse("Preview not ready", { status: 404 });
   }
 
-  // Double-prefix guard: Worker adds /api/preview-proxy/N/ to every path.
-  // If a redirect loops back, strip the inner prefix.
   let realSegments = segments;
-  if (
-    segments &&
-    segments.length >= 3 &&
-    segments[0] === "api" &&
-    segments[1] === "preview-proxy" &&
-    segments[2] === pr
-  ) {
+  if (segments?.length >= 3 && segments[0] === "api" && segments[1] === "preview-proxy" && segments[2] === pr) {
     realSegments = segments.slice(3);
   }
 
@@ -60,43 +47,34 @@ export async function GET(
     });
     const body = await upstream.arrayBuffer();
     const headers = new Headers();
-    const contentType = upstream.headers.get("content-type");
-    if (contentType) headers.set("content-type", contentType);
+    const ct = upstream.headers.get("content-type");
+    if (ct) headers.set("content-type", ct);
     return new NextResponse(body, { status: upstream.status, headers });
   } catch {
-    // Hairpin-NAT fallback: redirect so the Cloudflare Worker fetches the
-    // provider URL from outside the Akash network.
     return NextResponse.redirect(target, 307);
   }
 }
 
-// ── Disk file server ──────────────────────────────────────────────────────────
+// ── Async disk file server ────────────────────────────────────────────────────
 
-function serveFromDisk(
+async function serveFromDisk(
   filesPath: string,
   segments: string[],
-  request: NextRequest
-): NextResponse {
-  // Resolve the requested path within the preview directory.
+  _request: NextRequest
+): Promise<NextResponse> {
   const relative = segments.length ? segments.join("/") : "";
-  let candidate = path.normalize(path.join(filesPath, relative));
+  const candidate = path.normalize(path.join(filesPath, relative));
 
   // Security: never escape the preview directory.
   if (!candidate.startsWith(path.normalize(filesPath))) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  // Resolve to a real file using Astro's output conventions:
-  //   /            → index.html
-  //   /about       → about/index.html  OR  about.html
-  //   /about/      → about/index.html
-  const resolved = resolveFile(candidate);
+  const resolved = await resolveFile(candidate);
   if (!resolved) {
-    // Serve the generated 404 page if available.
-    const notFoundPage = path.join(filesPath, "404.html");
-    const nf = tryFile(notFoundPage);
+    const nf = await tryFile(path.join(filesPath, "404.html"));
     if (nf) {
-      return new NextResponse(readFileSync(nf), {
+      return new NextResponse(await readFile(nf), {
         status: 404,
         headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
       });
@@ -108,27 +86,34 @@ function serveFromDisk(
     "content-type": mimeType(resolved),
   };
 
-  // Cache-control: HTML never cached; hashed assets cached forever.
-  if (resolved.endsWith(".html")) {
-    headers["cache-control"] = "no-cache";
-  } else if (resolved.includes("/_astro/")) {
+  // Hashed assets (_astro/) are immutable — cache at browser and CDN edge.
+  // HTML pages must revalidate so content updates are picked up.
+  if (resolved.includes("/_astro/")) {
     headers["cache-control"] = "public, max-age=31536000, immutable";
+  } else if (resolved.endsWith(".html")) {
+    headers["cache-control"] = "no-cache";
+  } else {
+    headers["cache-control"] = "public, max-age=3600";
   }
 
-  return new NextResponse(readFileSync(resolved), { headers });
+  const content = await readFile(resolved);
+  return new NextResponse(content, { headers });
 }
 
-/** Return the path if it exists AND is a regular file (not a directory). */
-function tryFile(p: string): string | null {
-  try { return statSync(p).isFile() ? p : null; } catch { return null; }
+async function tryFile(p: string): Promise<string | null> {
+  try {
+    const s = await stat(p);
+    return s.isFile() ? p : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Try candidate paths in order; return the first that is a real file. */
-function resolveFile(candidate: string): string | null {
+async function resolveFile(candidate: string): Promise<string | null> {
   return (
-    tryFile(candidate) ??                      // exact file match
-    tryFile(`${candidate}/index.html`) ??      // directory → index.html
-    tryFile(`${candidate}.html`) ??            // /about → about.html
+    (await tryFile(candidate)) ??
+    (await tryFile(`${candidate}/index.html`)) ??
+    (await tryFile(`${candidate}.html`)) ??
     null
   );
 }
