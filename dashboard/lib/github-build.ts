@@ -59,10 +59,34 @@ async function findRun(token: string, sinceMs: number): Promise<RunInfo> {
   throw new Error("Build run did not appear within 60s of dispatch");
 }
 
-/** Trigger a build and return as soon as the run is registered (exposes run URL). */
+/** Trigger a PR build (fetches from upstream akash-network/website). */
 export async function startBuild(prNumber: number, token: string): Promise<RunInfo> {
   const since = Date.now();
   await dispatch(prNumber, token);
+  return findRun(token, since);
+}
+
+/** Trigger a branch build (fetches from the fork at a given ref). */
+export async function startBranchBuild(
+  branchRef: string,
+  branchRepo: string,
+  token: string
+): Promise<RunInfo> {
+  const since = Date.now();
+  const res = await fetch(
+    `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+    {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({
+        ref: "main",
+        inputs: { ref: branchRef, repo: branchRepo },
+      }),
+    }
+  );
+  if (res.status !== 204) {
+    throw new Error(`workflow_dispatch failed: ${res.status} ${await res.text()}`);
+  }
   return findRun(token, since);
 }
 
@@ -89,9 +113,13 @@ export async function awaitBuild(runId: number, token: string, maxWaitMs = 900_0
  * Returns the zip download URL for the first artifact matching `preview-{prNumber}-`
  * in the given run. GitHub redirects this URL to a pre-signed CDN URL.
  */
+/**
+ * Returns the zip download URL for the artifact matching `preview-{slug}-{runId}`.
+ * slug is e.g. "pr-1233" or "branch-my-feature".
+ */
 export async function getArtifactUrl(
   runId: number,
-  prNumber: number,
+  slug: string,
   token: string
 ): Promise<string> {
   const res = await fetch(
@@ -100,11 +128,11 @@ export async function getArtifactUrl(
   );
   const data = await res.json();
   const artifact = (data.artifacts ?? []).find((a: { name: string }) =>
-    a.name.startsWith(`preview-${prNumber}-`)
+    a.name.startsWith(`preview-${slug}-`)
   );
   if (!artifact) {
     throw new Error(
-      `No artifact found for PR #${prNumber} in run ${runId}. ` +
+      `No artifact found for slug "${slug}" in run ${runId}. ` +
       `Available: ${(data.artifacts ?? []).map((a: { name: string }) => a.name).join(", ")}`
     );
   }

@@ -28,10 +28,13 @@ type Phase = "building" | "deploying" | "live" | "failed";
 interface Preview {
   repo: string;
   prNumber: number;
+  slug: string;
   phase: Phase;
   previewUrl: string;
+  sourceType: "pr" | "branch";
+  branchRef?: string;
   buildRunUrl?: string;
-  imageRef?: string;   // set after a successful build; enables retry-deploy
+  imageRef?: string;
   error?: string;
   dseq?: string;
   provider?: string;
@@ -99,11 +102,12 @@ function DeployForm({
     e.preventDefault();
     setError("");
     setPending(true);
+    const isBranch = prUrl.includes("/tree/");
     try {
       const res = await fetch("/api/previews", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-deploy-token": token },
-        body: JSON.stringify({ prUrl }),
+        body: JSON.stringify(isBranch ? { branchUrl: prUrl } : { prUrl }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -131,7 +135,7 @@ function DeployForm({
           aria-label="Deploy password"
         />
         <Input
-          placeholder="https://github.com/akash-network/website/pull/123"
+          placeholder="…/pull/123  or  …/tree/my-branch"
           value={prUrl}
           onChange={(e) => setPrUrl(e.target.value)}
           disabled={pending}
@@ -293,15 +297,23 @@ export function PreviewTable() {
             </TableHeader>
             <TableBody>
               {previews.map((p) => {
-                const id = `pr-${p.prNumber}`;
+                const id = p.slug ?? `pr-${p.prNumber}`;
                 return (
                   <TableRow key={id}>
-                    <TableCell className="font-mono font-medium">#{p.prNumber}</TableCell>
+                    <TableCell className="font-mono font-medium">
+                      {p.sourceType === "branch" ? (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded">branch</span>
+                      ) : (
+                        `#${p.prNumber}`
+                      )}
+                    </TableCell>
                     <TableCell>
-                      <div className="text-sm font-medium">{p.repo}</div>
+                      <div className="text-sm font-medium">
+                        {p.sourceType === "branch" ? p.branchRef : p.repo}
+                      </div>
                       <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
                         <GitBranch className="w-3 h-3" />
-                        pr-{p.prNumber}
+                        {p.slug ?? (p.sourceType === "branch" ? p.branchRef : `pr-${p.prNumber}`)}
                       </div>
                     </TableCell>
                     <TableCell>

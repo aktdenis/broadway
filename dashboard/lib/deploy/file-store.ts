@@ -12,8 +12,9 @@ import path from "path";
 
 const PREVIEWS_ROOT = process.env.PREVIEWS_ROOT ?? "/data/previews";
 
-export function previewDir(prNumber: number): string {
-  return path.join(PREVIEWS_ROOT, String(prNumber));
+/** Directory where a preview's files are stored, keyed by slug. */
+export function previewDir(slug: string): string {
+  return path.join(PREVIEWS_ROOT, slug);
 }
 
 /**
@@ -22,11 +23,11 @@ export function previewDir(prNumber: number): string {
  */
 export async function downloadAndExtract(
   artifactUrl: string,
-  prNumber: number,
+  slug: string,
   token: string
 ): Promise<string> {
-  const outDir = previewDir(prNumber);
-  const tmpZip = path.join("/tmp", `preview-${prNumber}-${Date.now()}.zip`);
+  const outDir = previewDir(slug);
+  const tmpZip = path.join("/tmp", `preview-${slug}-${Date.now()}.zip`);
 
   mkdirSync(outDir, { recursive: true });
 
@@ -54,16 +55,16 @@ export async function downloadAndExtract(
     try { rmSync(tmpZip); } catch { /* best-effort cleanup */ }
   }
 
-  console.log(`[file-store] Extracted preview for PR #${prNumber} → ${outDir}`);
+  console.log(`[file-store] Extracted preview for ${slug} → ${outDir}`);
   return outDir;
 }
 
 /** Remove all files for a PR preview (called on teardown). */
-export function deletePreviewFiles(prNumber: number): void {
-  const dir = previewDir(prNumber);
+export function deletePreviewFiles(slug: string): void {
+  const dir = previewDir(slug);
   if (existsSync(dir)) {
     rmSync(dir, { recursive: true, force: true });
-    console.log(`[file-store] Deleted preview files for PR #${prNumber}`);
+    console.log(`[file-store] Deleted preview files for ${slug}`);
   }
 }
 

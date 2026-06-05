@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { AkashConsoleClient } from "@/lib/akash/client";
 import { deleteRecord, allRecords } from "@/lib/deploy/store";
+import { deletePreviewFiles } from "@/lib/deploy/file-store";
 import { authorized } from "@/lib/auth";
 
 export async function DELETE(
@@ -18,19 +19,27 @@ export async function DELETE(
   }
 
   const client = new AkashConsoleClient(apiKey);
-  // `dseq` param may be a real dseq (live preview) or "pr-<n>" (still building).
+
+  // Accept: slug ("pr-1233", "branch-my-feature"), real dseq, or bare PR number
   const record = allRecords().find(
-    (r) => r.dseq === dseq || `pr-${r.prNumber}` === dseq
+    (r) =>
+      r.slug === dseq ||
+      r.dseq === dseq ||
+      `pr-${r.prNumber}` === dseq ||
+      (r.prNumber !== 0 && String(r.prNumber) === dseq)
   );
-  const toClose = record?.dseq ?? (/^\d+$/.test(dseq) ? dseq : undefined);
+
+  // Close Akash deployment if this was a container-based preview
+  const toClose = record?.dseq ?? (/^\d{10,}$/.test(dseq) ? dseq : undefined);
   if (toClose) {
-    try {
-      await client.closeDeployment(toClose);
-    } catch {
-      // deployment may not exist yet; deleting the record is enough
-    }
+    try { await client.closeDeployment(toClose); } catch { /* already closed */ }
   }
-  if (record) deleteRecord(record.repo, record.prNumber);
+
+  // Delete static files from disk
+  if (record?.slug) deletePreviewFiles(record.slug);
+  else if (record?.prNumber) deletePreviewFiles(`pr-${record.prNumber}`);
+
+  if (record) deleteRecord(record.slug ?? `pr-${record.prNumber}`);
 
   return NextResponse.json({ success: true });
 }

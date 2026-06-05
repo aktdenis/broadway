@@ -10,7 +10,11 @@ export async function GET(
 ) {
   const { pr, path: segments } = await params;
   const records = allRecords();
-  const record = records.find((r) => r.prNumber === parseInt(pr, 10));
+  // pr param is a slug like "pr-1233" or "branch-my-feature".
+  // Also accept bare numbers for backward compat (old Cloudflare Worker sent "1233").
+  const record =
+    records.find((r) => r.slug === pr) ??
+    records.find((r) => r.prNumber === parseInt(pr, 10) && pr.match(/^\d+$/));
 
   if (!record) {
     return new NextResponse("Preview not found", { status: 404 });

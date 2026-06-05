@@ -3,6 +3,7 @@
 // the token.
 
 export const ALLOWED_REPO = "akash-network/website";
+export const ALLOWED_FORK = process.env.ALLOWED_FORK ?? "aktdenis/akash-network-website";
 
 /** True if the request carries the deploy token, or auth is disabled (token unset). */
 export function authorized(req: Request): boolean {
