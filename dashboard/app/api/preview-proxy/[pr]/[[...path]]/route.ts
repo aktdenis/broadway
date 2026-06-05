@@ -32,7 +32,7 @@ export async function GET(
   }
 
   let realSegments = segments;
-  if (segments?.length >= 3 && segments[0] === "api" && segments[1] === "preview-proxy" && segments[2] === pr) {
+  if (segments && segments.length >= 3 && segments[0] === "api" && segments[1] === "preview-proxy" && segments[2] === pr) {
     realSegments = segments.slice(3);
   }
 
