@@ -10,11 +10,15 @@ export async function GET(
 ) {
   const { pr, path: segments } = await params;
   const records = allRecords();
-  // pr param is a slug like "pr-1233" or "branch-my-feature".
-  // Also accept bare numbers for backward compat (old Cloudflare Worker sent "1233").
+  // pr param is a slug: "pr-1233", "branch-my-feature", or bare "1233" (old Worker).
+  // Old store records have prNumber but no slug field — handle all three cases.
+  const prNum = pr.startsWith("pr-")
+    ? parseInt(pr.slice(3), 10)   // "pr-1233" → 1233
+    : parseInt(pr, 10);           // "1233" → 1233 (legacy), "branch-*" → NaN
+
   const record =
     records.find((r) => r.slug === pr) ??
-    records.find((r) => r.prNumber === parseInt(pr, 10) && pr.match(/^\d+$/));
+    (!isNaN(prNum) ? records.find((r) => r.prNumber === prNum) : undefined);
 
   if (!record) {
     return new NextResponse("Preview not found", { status: 404 });
