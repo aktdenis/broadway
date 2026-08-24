@@ -6,11 +6,11 @@
 #
 # Example (Next.js):
 #   next build          # produces out/
-#   BROADWAY_TOKEN=BD_QyqdOk1eqeRfcIJ1S ./scripts/broadway-push.sh akashml ./out
+#   BROADWAY_TOKEN=<your-token> ./scripts/broadway-push.sh akashml ./out
 #
 # Example (Astro):
 #   astro build         # produces dist/
-#   BROADWAY_TOKEN=BD_QyqdOk1eqeRfcIJ1S ./scripts/broadway-push.sh my-site ./dist
+#   BROADWAY_TOKEN=<your-token> ./scripts/broadway-push.sh my-site ./dist
 #
 # The preview will be live at: https://branch-<slug>.akash.world
 
