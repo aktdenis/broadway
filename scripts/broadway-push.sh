@@ -26,7 +26,7 @@ if [ ! -d "$DIR" ]; then
   exit 1
 fi
 
-TMP=$(mktemp /tmp/broadway-XXXXXX.zip)
+TMP="/tmp/broadway-$$-$(date +%s).zip"
 trap 'rm -f "$TMP"' EXIT
 
 echo "Zipping $DIR…"
