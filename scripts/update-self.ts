@@ -40,6 +40,7 @@ async function main() {
     .replace("- DEPLOY_TOKEN=", `- DEPLOY_TOKEN=${process.env.DEPLOY_TOKEN ?? ""}`)
     .replace("- EXCLUDE_PROVIDERS=", `- EXCLUDE_PROVIDERS=${process.env.EXCLUDE_PROVIDERS ?? ""}`)
     .replace("- PREFER_PROVIDER=", `- PREFER_PROVIDER=${process.env.PREFER_PROVIDER ?? ""}`)
+    .replace("- ALLOWED_FORKS=aktdenis/akash-network-website,aktdenis/console", `- ALLOWED_FORKS=${process.env.ALLOWED_FORKS ?? "aktdenis/akash-network-website,aktdenis/console"}`)
     .replace("- PREVIEWS_ROOT=/data/previews", "- PREVIEWS_ROOT=/data/previews");
 
   const client = new AkashConsoleClient(apiKey!);

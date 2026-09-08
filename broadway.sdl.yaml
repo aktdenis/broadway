@@ -46,8 +46,8 @@ profiles:
     dcloud:
       pricing:
         broadway:
-          denom: uusd
-          amount: 1000
+          denom: uakt
+          amount: 10000
 
 deployment:
   broadway:
