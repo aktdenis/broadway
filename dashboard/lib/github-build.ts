@@ -146,7 +146,7 @@ export async function getArtifactUrl(
       `Available: ${(data.artifacts ?? []).map((a: { name: string }) => a.name).join(", ")}`
     );
   }
-  return `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/artifacts/${artifact.id}/zip`;
+  return `${GH}/repos/${OWNER}/${repo}/actions/artifacts/${artifact.id}/zip`;
 }
 
 function sleep(ms: number): Promise<void> {
