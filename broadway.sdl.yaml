@@ -21,6 +21,7 @@ services:
       - MAX_PREVIEWS=8
       - EXCLUDE_PROVIDERS=akash1ek2p65eg2c8sgge3m04e9af00lppzsg3v6xx0x,akash15tl6v6gd0nte0syyxnv57zmmspgju4c3xfmdhk
       - PREFER_PROVIDER=
+      - ALLOWED_FORKS=aktdenis/akash-network-website,aktdenis/console
     params:
       storage:
         data:

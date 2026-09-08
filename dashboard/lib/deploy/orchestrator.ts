@@ -1,5 +1,5 @@
 import { AkashConsoleClient } from "@/lib/akash/client";
-import { startBuild, startBranchBuild, awaitBuild, getArtifactUrl } from "@/lib/github-build";
+import { startBuild, startBranchBuild, awaitBuild, getArtifactUrl, builderRepoFor } from "@/lib/github-build";
 import { upsertRecord, patchRecord, deleteRecord, getRecord, branchToSlug } from "@/lib/deploy/store";
 import { downloadAndExtract, deletePreviewFiles } from "@/lib/deploy/file-store";
 
@@ -26,9 +26,10 @@ export interface DeployResult {
 async function runBuildAndExtract(
   slug: string,
   runId: number,
-  token: string
+  token: string,
+  repo?: string
 ): Promise<string> {
-  const artifactUrl = await getArtifactUrl(runId, slug, token);
+  const artifactUrl = await getArtifactUrl(runId, slug, token, repo);
   return downloadAndExtract(artifactUrl, slug, token);
 }
 
@@ -98,12 +99,13 @@ export async function deployBranch(opts: DeployBranchOptions): Promise<DeployRes
     const token = process.env.GITHUB_TOKEN;
     if (!token) throw new Error("GITHUB_TOKEN not set");
 
+    const bRepo = builderRepoFor(branchRepo);
     const run = await startBranchBuild(branchRef, branchRepo, token);
     patchRecord(slug, { buildRunUrl: run.htmlUrl });
-    await awaitBuild(run.id, token);
+    await awaitBuild(run.id, token, 900_000, bRepo);
 
     patchRecord(slug, { phase: "deploying" });
-    const filesPath = await runBuildAndExtract(slug, run.id, token);
+    const filesPath = await runBuildAndExtract(slug, run.id, token, bRepo);
     patchRecord(slug, { phase: "live", filesPath });
 
     console.log(`[deploy] Branch ${branchRef} live at ${previewUrl}`);

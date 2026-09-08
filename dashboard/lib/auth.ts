@@ -3,7 +3,13 @@
 // the token.
 
 export const ALLOWED_REPO = "akash-network/website";
-export const ALLOWED_FORK = process.env.ALLOWED_FORK ?? "aktdenis/akash-network-website";
+
+/** Comma-separated list of repos allowed for branch deploys. */
+const RAW_ALLOWED_FORKS = process.env.ALLOWED_FORKS ?? process.env.ALLOWED_FORK ?? "aktdenis/akash-network-website";
+export const ALLOWED_FORKS: string[] = RAW_ALLOWED_FORKS.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+/** @deprecated use ALLOWED_FORKS */
+export const ALLOWED_FORK = ALLOWED_FORKS[0] ?? "aktdenis/akash-network-website";
 
 /** True if the request carries the deploy token, or auth is disabled (token unset). */
 export function authorized(req: Request): boolean {

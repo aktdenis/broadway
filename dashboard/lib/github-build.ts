@@ -1,11 +1,19 @@
-// Triggers and tracks the PR-preview build that runs in the fork
-// (aktdenis/akash-network-website) via workflow_dispatch, and reports the
-// resulting image. Plain fetch against the GitHub REST API.
+// Triggers and tracks preview builds via workflow_dispatch. Each fork repo
+// must have a preview-build.yml workflow. Plain fetch against the GitHub REST API.
 
 const OWNER = "aktdenis";
-const BUILDER_REPO = "akash-network-website";
 const WORKFLOW_FILE = "preview-build.yml";
 const GH = "https://api.github.com";
+
+// Default builder repo for PR deploys and website branch deploys.
+const DEFAULT_BUILDER_REPO = "akash-network-website";
+
+/** Map a fork repo (lowercase) to the repo that hosts its preview-build workflow. */
+export function builderRepoFor(branchRepo: string): string {
+  const r = branchRepo.toLowerCase();
+  if (r === "aktdenis/console") return "console";
+  return DEFAULT_BUILDER_REPO;
+}
 
 export interface RunInfo {
   id: number;
@@ -22,9 +30,9 @@ function headers(token: string) {
   };
 }
 
-async function dispatch(prNumber: number, token: string): Promise<void> {
+async function dispatch(repo: string, prNumber: number, token: string): Promise<void> {
   const res = await fetch(
-    `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+    `${GH}/repos/${OWNER}/${repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
     {
       method: "POST",
       headers: headers(token),
@@ -38,11 +46,11 @@ async function dispatch(prNumber: number, token: string): Promise<void> {
 
 // workflow_dispatch returns no run id, so locate the run we just triggered by
 // finding the newest dispatch run created at/after our dispatch time.
-async function findRun(token: string, sinceMs: number): Promise<RunInfo> {
+async function findRun(repo: string, token: string, sinceMs: number): Promise<RunInfo> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const res = await fetch(
-      `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/workflows/${WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=10`,
+      `${GH}/repos/${OWNER}/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=10`,
       { headers: headers(token) }
     );
     const data = await res.json();
@@ -62,8 +70,8 @@ async function findRun(token: string, sinceMs: number): Promise<RunInfo> {
 /** Trigger a PR build (fetches from upstream akash-network/website). */
 export async function startBuild(prNumber: number, token: string): Promise<RunInfo> {
   const since = Date.now();
-  await dispatch(prNumber, token);
-  return findRun(token, since);
+  await dispatch(DEFAULT_BUILDER_REPO, prNumber, token);
+  return findRun(DEFAULT_BUILDER_REPO, token, since);
 }
 
 /** Trigger a branch build (fetches from the fork at a given ref). */
@@ -72,9 +80,10 @@ export async function startBranchBuild(
   branchRepo: string,
   token: string
 ): Promise<RunInfo> {
+  const repo = builderRepoFor(branchRepo);
   const since = Date.now();
   const res = await fetch(
-    `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
+    `${GH}/repos/${OWNER}/${repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`,
     {
       method: "POST",
       headers: headers(token),
@@ -87,14 +96,14 @@ export async function startBranchBuild(
   if (res.status !== 204) {
     throw new Error(`workflow_dispatch failed: ${res.status} ${await res.text()}`);
   }
-  return findRun(token, since);
+  return findRun(repo, token, since);
 }
 
 /** Poll a run until it completes; throw if it did not succeed. */
-export async function awaitBuild(runId: number, token: string, maxWaitMs = 900_000): Promise<void> {
+export async function awaitBuild(runId: number, token: string, maxWaitMs = 900_000, repo = DEFAULT_BUILDER_REPO): Promise<void> {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
-    const res = await fetch(`${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/runs/${runId}`, {
+    const res = await fetch(`${GH}/repos/${OWNER}/${repo}/actions/runs/${runId}`, {
       headers: headers(token),
     });
     const r = await res.json();
@@ -120,10 +129,11 @@ export async function awaitBuild(runId: number, token: string, maxWaitMs = 900_0
 export async function getArtifactUrl(
   runId: number,
   slug: string,
-  token: string
+  token: string,
+  repo = DEFAULT_BUILDER_REPO
 ): Promise<string> {
   const res = await fetch(
-    `${GH}/repos/${OWNER}/${BUILDER_REPO}/actions/runs/${runId}/artifacts`,
+    `${GH}/repos/${OWNER}/${repo}/actions/runs/${runId}/artifacts`,
     { headers: headers(token) }
   );
   const data = await res.json();

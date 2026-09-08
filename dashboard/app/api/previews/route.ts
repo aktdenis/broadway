@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { allRecords, branchToSlug } from "@/lib/deploy/store";
 import { AkashConsoleClient } from "@/lib/akash/client";
 import { deployPreview, deployBranch } from "@/lib/deploy/orchestrator";
-import { authorized, ALLOWED_REPO, ALLOWED_FORK, previewCap } from "@/lib/auth";
+import { authorized, ALLOWED_REPO, ALLOWED_FORKS, previewCap } from "@/lib/auth";
 
 export async function GET() {
   const records = allRecords();
@@ -72,9 +72,9 @@ export async function POST(req: Request) {
     const branchRepo = branchMatch[1];
     const branchRef = decodeURIComponent(branchMatch[2]);
 
-    if (branchRepo.toLowerCase() !== ALLOWED_FORK) {
+    if (!ALLOWED_FORKS.includes(branchRepo.toLowerCase())) {
       return NextResponse.json(
-        { error: `Branch deploys are only supported from ${ALLOWED_FORK}` },
+        { error: `Branch deploys are only supported from: ${ALLOWED_FORKS.join(", ")}` },
         { status: 400 }
       );
     }
