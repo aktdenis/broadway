@@ -21,6 +21,9 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   });
 
   const responseHeaders = new Headers(upstreamResponse.headers);
+  for (const key of responseHeaders.keys()) {
+    if (key.startsWith("access-control-")) responseHeaders.delete(key);
+  }
   for (const [key, value] of Object.entries(CORS_HEADERS)) {
     responseHeaders.set(key, value);
   }
