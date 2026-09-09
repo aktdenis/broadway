@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const PR_HOST = "pr-(?<pr>\\d+)\\.broadway\\.akash\\.world";
+// branch-<slug>.akash.world — served when Cloudflare forwards with the bare subdomain as Host
+const BRANCH_HOST = "(?<pr>branch-[a-z0-9-]+)\\.akash\\.world";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -10,16 +12,28 @@ const nextConfig: NextConfig = {
   skipTrailingSlashRedirect: true,
   async rewrites() {
     return [
-      // Root path of a preview subdomain
+      // Root path of a pr-N preview subdomain (broadway.akash.world)
       {
         source: "/",
         has: [{ type: "host", value: PR_HOST }],
         destination: "/api/preview-proxy/:pr",
       },
-      // All sub-paths of a preview subdomain
+      // All sub-paths of a pr-N preview subdomain
       {
         source: "/:path+",
         has: [{ type: "host", value: PR_HOST }],
+        destination: "/api/preview-proxy/:pr/:path*",
+      },
+      // Root path of a branch-<slug>.akash.world subdomain
+      {
+        source: "/",
+        has: [{ type: "host", value: BRANCH_HOST }],
+        destination: "/api/preview-proxy/:pr",
+      },
+      // All sub-paths of a branch-<slug>.akash.world subdomain
+      {
+        source: "/:path+",
+        has: [{ type: "host", value: BRANCH_HOST }],
         destination: "/api/preview-proxy/:pr/:path*",
       },
     ];
