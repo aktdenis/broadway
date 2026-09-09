@@ -15,14 +15,16 @@ async function proxy(request: NextRequest, path: string[]): Promise<NextResponse
   const upstreamResponse = await fetch(upstreamUrl.toString(), {
     method: request.method,
     headers: Object.fromEntries(
-      [...request.headers.entries()].filter(([k]) => !["host", "origin", "referer"].includes(k))
+      [...request.headers.entries()].filter(([k]) => !["host", "origin", "referer", "accept-encoding"].includes(k))
     ),
     body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer(),
   });
 
   const responseHeaders = new Headers(upstreamResponse.headers);
   for (const key of responseHeaders.keys()) {
-    if (key.startsWith("access-control-")) responseHeaders.delete(key);
+    if (key.startsWith("access-control-") || key === "content-encoding" || key === "transfer-encoding") {
+      responseHeaders.delete(key);
+    }
   }
   for (const [key, value] of Object.entries(CORS_HEADERS)) {
     responseHeaders.set(key, value);
